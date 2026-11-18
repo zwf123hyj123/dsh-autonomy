@@ -7,7 +7,7 @@
 
 ## 安装
 
-仓库：随 dsh-autonomy 发布（modules/dsh-ctxc）
+仓库：https://github.com/zwf123hyj123/-dsh-ctxc
 
 需要一台跑着 dsh-go 的主机和一个 Ollama 服务（本机或局域网，OpenAI 兼容端点）。
 
@@ -59,6 +59,19 @@ dsh plugin --profile web add <本仓库目录>
 
 - 本地小模型只做**预筛**：摘要会丢细节，关键信息请保留原文指针。
 - 超过输入框容量的长文请用仓库配套的 \`ctxc.py\`（命令行全文压缩）或分次压缩。
+
+## 致谢与出处
+
+本项目的关键思路与参数来自以下来源（按贡献度）：
+
+- **断点压缩**：断点下载/HTTP Range 续传思想（进度落盘 + 中断续传）。
+- **记忆与连续性**：Anthropic《The components of agent memory》——四层记忆、原始记录不改、压缩后校准。
+- **小模型量化实测**：ertas.ai《Q4、Q5 和 Q8 对比: GGUF 移动端量化》；mvpfactory.io《Embedding Local LLMs in Your Mobile App》（llama.cpp KMP + 4-bit 移动端工程）。
+- **上下文压缩综述**：ACM《KV Cache Compression for Inference Efficiency in LLMs: A Review》；NeuralTrust《Prompt Compression Guide》。
+- **剪枝 vs 量化取舍**：ACL Anthology《Revisiting Pruning vs Quantization for Small Language Models》(EMNLP 2025 Findings)。
+- **工具与运行环境**：llama.cpp / GGUF / Ollama；dsh-go 插件体系；手机 proot + Ollama 1.5B Q4_K_M 实测环境。
+- **云端自动切换**：dsh-our-free-model 的 chanGateway 网关（自动切换健康免费模型）。
+- **测试支撑**：全部断点/分段/并发参数均为真机实测口径（见 docs 内实测数据）。
 
 ## License
 
