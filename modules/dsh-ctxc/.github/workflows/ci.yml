@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 语法检查 lib/index.js
+        run: node --check lib/index.js
+      - name: 校验 package.json 与 dshGo 清单
+        run: node .github/scripts/validate.mjs

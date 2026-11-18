@@ -1,0 +1,65 @@
+# dsh-ctxc
+
+用本地 Ollama 小模型压缩上下文的 dsh-go 插件。两个功能：
+
+1. **「压一下」胶囊**（输入框上方）：读剪贴板 → 本地模型压成中文要点 → 回贴输入框。短文本本地压（默认 ≤2600 字分块压缩），超出自动改为「云端压缩」：把指令+正文填入输入框，发送后由当前对话的云端模型压。
+2. **每轮自动压缩**（回合钩子）：每轮对话结束后，后台把这一轮「用户 → 助手」的原话压成一条，滚动写入会话卡（默认 \`$DSH_HOME/ctxc-cards/<sid13>.md\`，保留 5 条）。同会话 2 分钟冷却、日志 >20MB 跳过、失败静默，不影响对话。
+
+## 安装
+
+仓库：随 dsh-autonomy 发布（modules/dsh-ctxc）
+
+需要一台跑着 dsh-go 的主机和一个 Ollama 服务（本机或局域网，OpenAI 兼容端点）。
+
+\`\`\`sh
+dsh plugin --profile web add dsh-ctxc@0.2.0
+# 或从 GitHub 目录安装：
+dsh plugin --profile web add <本仓库目录>
+\`\`\`
+
+## 配置（环境变量，均可选）
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| \`CTXC_API\` | \`http://127.0.0.1:11436/v1/chat/completions\` | Ollama OpenAI 兼容端点 |
+| \`CTXC_MODEL\` | \`qwen2.5:1.5b-instruct\` | 压缩用模型 |
+| \`CTXC_CARD_DIR\` | \`$DSH_HOME/ctxc-cards\` | 会话卡目录 |
+| \`CTXC_MAX_LOCAL\` | \`2600\` | 本地压缩的最大字符数（超出走云端路径） |
+| \`CTXC_CHUNK\` | \`380\` | 单块上限（小模型长输入易崩，别调太大） |
+| \`CTXC_MAX_TOKENS\` | \`45\` | 每块输出 token 上限 |
+
+## 实测（手机 proot + Ollama 1.5B Q4_K_M）
+
+- 短任务秒回；单工具 JSON 格式合规。
+- 230 字以上的单次长输入会把手机小模型打挂 → 分块是硬约束。
+- 分块压缩实测：3008 字 → 1133 字（62%），5 块全过。
+- proot 环境 ~1.1-4 tok/s（冷/暖机差异大）。
+
+## 模块索引与出处
+
+| 模块 | 位置 | 出处 / 来源 |
+|---|---|---|
+| 「压一下」胶囊 | [lib/index.js](lib/index.js) | 手机 proot 实测版 local-ctxc 0.2.x，短文本地压、超长转当前对话云端压 |
+| 每轮自动会话卡 | [lib/index.js](lib/index.js)（turn.note 段） | 连续性卡体系：每轮原话样本滚动，2 分钟冷却、20MB 日志上限 |
+| 压缩 CLI | [scripts/ctxc.py](scripts/ctxc.py) | 本机 ctxc.py v3：断点续传 + 按功能/上下文分段（大段总结、小段原样）+ 本地 Ollama |
+| 模型压缩方案 | [docs/compression-plan.md](docs/compression-plan.md) | 量化/蒸馏/剪枝/上下文压缩路线（实测口径见文内） |
+| 上下文压缩方案 | [docs/context-compression.md](docs/context-compression.md) | 预筛原则、分块硬约束、失败回退、实测数据 |
+| CI 检查 | [.github/workflows/ci.yml](.github/workflows/ci.yml) | 语法 + dshGo 清单校验（[validate.mjs](.github/scripts/validate.mjs)） |
+| Issue 模板 | [.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/) | 中文问题反馈 / 功能建议表单 |
+| Release 工作流 | [.github/workflows/release.yml](.github/workflows/release.yml) | 打 v* 标签自动打包 + 创建 Release |
+| npm 发布 | [.github/workflows/npm-publish.yml](.github/workflows/npm-publish.yml) | 配置 NPM_TOKEN 后自动发布，未配自动跳过 |
+
+## 方案文档
+
+- [模型压缩方案](docs/compression-plan.md)：量化/蒸馏/混合并发压缩的完整路线
+- [上下文压缩方案](docs/context-compression.md)：ctxc.py 用法、云端自动切换、失败回退
+- 命令行全文压缩：`scripts/ctxc.py`（混合并发：本地 + 云端自动切换）
+
+## 边界
+
+- 本地小模型只做**预筛**：摘要会丢细节，关键信息请保留原文指针。
+- 超过输入框容量的长文请用仓库配套的 \`ctxc.py\`（命令行全文压缩）或分次压缩。
+
+## License
+
+MIT

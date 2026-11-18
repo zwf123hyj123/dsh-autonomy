@@ -1,0 +1,14 @@
+name: 功能建议
+description: 想要的新功能或改进
+labels: [enhancement]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: 想要什么
+      description: 描述功能和使用场景
+    validations: { required: true }
+  - type: textarea
+    id: why
+    attributes:
+      label: 为什么需要
