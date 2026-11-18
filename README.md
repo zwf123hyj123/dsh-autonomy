@@ -8,7 +8,7 @@
 |---|---|---|
 | 防炸 anti-blowup | [modules/anti-blowup](modules/anti-blowup) | 每日体检会话；爆掉的自动抢救导出；快爆导索引；抢救产出自动压缩；命名核对（反幻门）；触发思维碰撞；知识区 git 版控 |
 | 上下文压缩 dsh-ctxc | [modules/dsh-ctxc](modules/dsh-ctxc) | dsh-go 插件：「压一下」胶囊 + 每轮自动会话卡；[ctxc.py](modules/dsh-ctxc/scripts/ctxc.py)：断点压缩 + 功能分段（大段总结、小段原样）+ 本地 Ollama 与云端并发 |
-| 模拟大脑 brain | [modules/brain](modules/brain) | 记忆/知识/突触/思维碰撞架构；关联引擎（白名单+待核实反幻门）；收件箱自动归档；发布清单模板；配套公开知识库见 dsh-knowledge |
+| 模拟大脑 brain | [modules/brain](modules/brain) | 记忆/知识/突触/思维碰撞架构；关联引擎（白名单+待核实反幻门）；收件箱自动归档；发布清单模板；[建设邀请问询](modules/brain/建设邀请.md)（同意者入贡献名单与致谢，只问一次）；配套公开知识库见 dsh-knowledge |
 
 ## 设计原则
 
