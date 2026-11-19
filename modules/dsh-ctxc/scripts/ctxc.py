@@ -21,7 +21,12 @@ LOCAL_API = os.environ.get("CTXC_API", "http://127.0.0.1:11436/v1/chat/completio
 LOCAL_MODEL = os.environ.get("CTXC_MODEL", "qwen2.5:1.5b-instruct")
 LOCAL_MAX = int(os.environ.get("CTXC_LOCAL_MAX", "2600"))
 SMALL_KEEP = int(os.environ.get("CTXC_SMALL_KEEP", "120"))
-STATE_DIR = os.environ.get("CTXC_STATE_DIR", "/tmp/ctxc-state")
+STATE_DIR = os.environ.get("CTXC_STATE_DIR", "/root/workspace/记忆档案/连续性/断点")
+EVENT_LOG = os.environ.get("CTXC_EVENT_LOG", "/root/workspace/记忆档案/连续性/压缩事件.jsonl")
+COMMON = os.path.join(STATE_DIR, "common.json")  # 上下通点索引：跨输入的上下文共通点断法
+
+def norm_hash(text):
+    return hashlib.sha256(re.sub(r"\s+", "", text).encode("utf-8")).hexdigest()[:16]
 LOCAL_CHUNK = 380
 CLOUD_CHUNK = 1500
 CLOUD_API = os.environ.get("CTXC_CLOUD_API", "")
@@ -109,6 +114,8 @@ def main():
     ap.add_argument("--keep-paths", action="store_true")
     ap.add_argument("--fresh", action="store_true", help="放弃旧进度重压")
     ap.add_argument("--no-hybrid", action="store_true")
+    ap.add_argument("--ckpt", choices=["auto", "module", "common"], default="auto",
+                    help="断点法：module=模块断法（按输入独立）；common=上下通点（跨输入共通点复用）；auto=两者结合")
     args = ap.parse_args()
 
     if args.file:
@@ -133,6 +140,18 @@ def main():
         json.dump(state, open(tmp, "w"), ensure_ascii=False)
         os.replace(tmp, state_path)
 
+    # ── 上下通点（上下文共通点断法）：跨输入复用索引 ──────────
+    def load_common():
+        try:
+            return json.load(open(COMMON))
+        except Exception:
+            return {}
+
+    def save_common(idx):
+        tmp = COMMON + ".tmp"
+        json.dump(idx, open(tmp, "w"), ensure_ascii=False)
+        os.replace(tmp, COMMON)
+
     # ── 建立/恢复单元列表（断点续传核心）────────────────────
     segs = segment(text)
     state = None if args.fresh else load_state()
@@ -156,7 +175,24 @@ def main():
             sum(1 for u in units if u["kind"] == "keep"),
             sum(1 for u in units if u["kind"] == "compress")), file=sys.stderr)
 
-    # ── 路由：压缩段按本地预算分配 ─────────────────────────
+    # ── 上下通点复用：跨输入共通段直接复用已压结果 ──────────
+    reused = 0
+    if args.ckpt in ("auto", "common"):
+        common_idx = load_common()
+        for u in units:
+            if u["kind"] != "compress" or u["done"]:
+                continue
+            key = norm_hash(u["text"])
+            if key in common_idx and common_idx[key]:
+                u["out"] = common_idx[key]
+                u["done"] = True
+                u["reused"] = True
+                reused += 1
+                save_state({"count": len(units), "units": units, "src": src})
+        if reused:
+            print("[ctxc] 上下通点复用：%d 段直接取共通点，跳过压缩" % reused, file=sys.stderr)
+
+    # ── 路由：压缩段按本地预算分配（模块断法：各自独立断点）───
     local_units, cloud_units, acc = [], [], 0
     for u in units:
         if u["kind"] != "compress" or u["done"]:
@@ -179,8 +215,17 @@ def main():
         outs = []
         for c in sub_chunk(u["text"], cap):
             outs.append(call(api, key, model, c))
-        unit_done(u, "\n".join(outs))
-        return u["out"]
+        out = "\n".join(outs)
+        unit_done(u, out)
+        # 写入共通点索引（auto/common 模式跨输入复用）
+        if args.ckpt in ("auto", "common") and out:
+            try:
+                ci = load_common()
+                ci[norm_hash(u["text"])] = out
+                save_common(ci)
+            except Exception:
+                pass
+        return out
 
     t0 = time.time()
     if use_cloud:
@@ -201,7 +246,7 @@ def main():
                         models.append(m["id"])
             except Exception:
                 pass
-            for u in cloud_units:
+            def _cloud_one(u):
                 ok = False
                 for m in models[:4]:
                     try:
@@ -213,6 +258,9 @@ def main():
                         continue
                 if not ok:
                     unit_done(u, "[云端压缩失败（已试自动切换）] 原文见: %s" % src)
+            # 并发输入输出：云端组 2 工作线程（本地组保持串行，手机小模型不并发）
+            with ThreadPoolExecutor(max_workers=2) as cex:
+                list(cex.map(_cloud_one, cloud_units))
         with ThreadPoolExecutor(max_workers=2) as ex:
             f1 = ex.submit(run_local)
             f2 = ex.submit(run_cloud)
@@ -225,7 +273,9 @@ def main():
         for u in cloud_units:
             unit_done(u, "[超出本地容量，云端未配置] 原文见: %s\n%s" % (src, u["text"]))
 
-    # ── 输出 ──────────────────────────────────────────────
+    # ── 输出（断点信息写入上下文输入）──────────────────────
+    done_n = sum(1 for u in units if u["done"])
+    print("[断点] 模块 %d/%d · 共通复用 %d · 断法 %s" % (done_n, len(units), reused, args.ckpt))
     if args.keep_paths:
         print("# 来源: %s" % src)
     for u in units:
@@ -233,10 +283,28 @@ def main():
             print("· " + u["text"].replace("\n", " ")[:200])
         else:
             print(u["out"] or "")
+    elapsed = time.time() - t0
+    resume = state is not None and state.get("count") == len(segs)
     print("[ctxc] 完成：保留 %d / 本地 %d / 云端 %d，耗时 %.1fs（断点状态: %s）" % (
         sum(1 for u in units if u["kind"] == "keep"),
         len(local_units), len(cloud_units) if use_cloud else 0,
-        time.time() - t0, state_path), file=sys.stderr)
+        elapsed, state_path), file=sys.stderr)
+    # 星图联动：事件写入记忆档案（星汐拾星器每 60 秒扫描该目录）
+    try:
+        os.makedirs(os.path.dirname(EVENT_LOG), exist_ok=True)
+        with open(EVENT_LOG, "a", encoding="utf-8") as ef:
+            ef.write(json.dumps({
+                "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "src": src, "hash": h, "mode": "resume" if resume else "fresh",
+                "segments": len(segs),
+                "kept": sum(1 for u in units if u["kind"] == "keep"),
+                "local": len(local_units),
+                "cloud": len(cloud_units) if use_cloud else 0,
+                "seconds": round(elapsed, 1),
+                "ckpt": args.ckpt, "reused": reused,
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     main()
