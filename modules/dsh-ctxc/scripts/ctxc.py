@@ -13,9 +13,13 @@
 #   CTXC_SMALL_KEEP             多少字以下原样保留（默认 120）
 #   CTXC_STATE_DIR              断点状态目录（默认 /tmp/ctxc-state）
 #   CTXC_CLOUD_API/KEY/MODEL    云端端点（缺省走 dsh-our-free-model 网关自动切换）
-import sys, json, os, re, hashlib, argparse, time
+import sys, json, os, re, hashlib, argparse, time, threading
 from concurrent.futures import ThreadPoolExecutor
 import urllib.request
+
+W_LOCAL = int(os.environ.get("CTXC_WORKERS_LOCAL", "2"))   # 本地并行（手机小模型别超 2）
+W_CLOUD = int(os.environ.get("CTXC_WORKERS_CLOUD", "4"))   # 云端并行（网关扛得住）
+LOCK = threading.Lock()  # 状态/共通点索引写锁（并行安全）
 
 LOCAL_API = os.environ.get("CTXC_API", "http://127.0.0.1:11436/v1/chat/completions")
 LOCAL_MODEL = os.environ.get("CTXC_MODEL", "qwen2.5:1.5b-instruct")
@@ -207,9 +211,10 @@ def main():
     use_cloud = bool(cloud_units) and bool(cloud_api) and not args.no_hybrid
 
     def unit_done(u, out):
-        u["out"] = out
-        u["done"] = True
-        save_state({"count": len(units), "units": units, "src": src})
+        with LOCK:
+            u["out"] = out
+            u["done"] = True
+            save_state({"count": len(units), "units": units, "src": src})
 
     def compress_unit(u, api, key, model, cap):
         outs = []
@@ -220,9 +225,10 @@ def main():
         # 写入共通点索引（auto/common 模式跨输入复用）
         if args.ckpt in ("auto", "common") and out:
             try:
-                ci = load_common()
-                ci[norm_hash(u["text"])] = out
-                save_common(ci)
+                with LOCK:
+                    ci = load_common()
+                    ci[norm_hash(u["text"])] = out
+                    save_common(ci)
             except Exception:
                 pass
         return out
@@ -230,9 +236,11 @@ def main():
     t0 = time.time()
     if use_cloud:
         def run_local():
-            for u in local_units:
-                compress_unit(u, LOCAL_API, "", LOCAL_MODEL, LOCAL_CHUNK)
-                print("[ctxc] 本地段完成 (%d 字)" % len(u["text"]), file=sys.stderr)
+            with ThreadPoolExecutor(max_workers=max(1, W_LOCAL)) as lex:
+                def _l(u):
+                    compress_unit(u, LOCAL_API, "", LOCAL_MODEL, LOCAL_CHUNK)
+                    print("[ctxc] 本地段完成 (%d 字)" % len(u["text"]), file=sys.stderr)
+                list(lex.map(_l, local_units))
         def run_cloud():
             models = [cloud_model]
             try:
@@ -258,8 +266,8 @@ def main():
                         continue
                 if not ok:
                     unit_done(u, "[云端压缩失败（已试自动切换）] 原文见: %s" % src)
-            # 并发输入输出：云端组 2 工作线程（本地组保持串行，手机小模型不并发）
-            with ThreadPoolExecutor(max_workers=2) as cex:
+            # 并发输入输出：云端组 W_CLOUD 工作线程
+            with ThreadPoolExecutor(max_workers=max(1, W_CLOUD)) as cex:
                 list(cex.map(_cloud_one, cloud_units))
         with ThreadPoolExecutor(max_workers=2) as ex:
             f1 = ex.submit(run_local)
@@ -267,9 +275,11 @@ def main():
             f1.result()
             f2.result()
     else:
-        for u in local_units:
-            compress_unit(u, LOCAL_API, "", LOCAL_MODEL, LOCAL_CHUNK)
-            print("[ctxc] 本地段完成 (%d 字)" % len(u["text"]), file=sys.stderr)
+        with ThreadPoolExecutor(max_workers=max(1, W_LOCAL)) as lex:
+            def _l2(u):
+                compress_unit(u, LOCAL_API, "", LOCAL_MODEL, LOCAL_CHUNK)
+                print("[ctxc] 本地段完成 (%d 字)" % len(u["text"]), file=sys.stderr)
+            list(lex.map(_l2, local_units))
         for u in cloud_units:
             unit_done(u, "[超出本地容量，云端未配置] 原文见: %s\n%s" % (src, u["text"]))
 
