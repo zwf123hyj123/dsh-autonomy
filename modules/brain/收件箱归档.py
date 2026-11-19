@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 # brain/收件箱归档.py — 把指定收件箱会话的新动态追加进知识区（断点记录，不重复收）。
 # 环境变量：DSH_HOME（默认 ~/.dsh）、BRAIN_ROOT（默认 ~/.dsh/brain）、INBOX_SID（会话 id 前 13 位）。
-import subprocess, json, os, re, datetime
+import subprocess, json, os, re, datetime, time
+
+CTXC_BIN = os.environ.get("CTXC_BIN", "")
 
 HOME = os.path.expanduser('~')
 DSH_HOME = os.environ.get('DSH_HOME', os.path.join(HOME, '.dsh'))
@@ -63,4 +65,22 @@ for t in new_lines:
 open(OUT, 'w', encoding='utf-8').write(body)
 st['last_seq'] = max([st.get('last_seq', 0)] + [int(m.group(1)) for m in re.finditer(r'### turn \d+ \(seq (\d+)\)', talk)] or [0])
 json.dump(st, open(STATE, 'w'), ensure_ascii=False, indent=1)
+
+# ── 动态超阈值 → 旧段并行压缩成历史摘要（需 CTXC_BIN 指向 ctxc）──
+try:
+    lines = body.splitlines()
+    if len(lines) > 60 and CTXC_BIN and os.path.exists(CTXC_BIN):
+        raw_dir = os.path.join(os.path.dirname(OUT), '原始')
+        os.makedirs(raw_dir, exist_ok=True)
+        old_file = os.path.join(raw_dir, '动态-历史-%s.md' % time.strftime('%Y%m%d-%H%M%S', time.localtime()))
+        keep = 30
+        open(old_file, 'w', encoding='utf-8').write('\n'.join(lines[:len(lines) - keep]))
+        r = subprocess.run(['python3', CTXC_BIN, old_file, '--ckpt', 'auto'],
+                           capture_output=True, text=True, timeout=3600)
+        if r.returncode == 0 and r.stdout.strip():
+            body2 = '\n'.join(lines[len(lines) - keep:]).rstrip() + '\n\n## 历史摘要（ctxc 并行压缩）\n\n' + r.stdout.strip() + '\n'
+            open(OUT, 'w', encoding='utf-8').write(body2)
+except Exception:
+    pass
+
 print(json.dumps({'新增': len(new_lines), 'last_seq': st['last_seq']}, ensure_ascii=False))
