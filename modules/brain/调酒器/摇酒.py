@@ -2,7 +2,22 @@
 # -*- coding: utf-8 -*-
 # 摇酒.py — 模拟大脑子项目「调酒器」的摇酒引擎。
 # 基酒=七情六欲；原料=人物设定卡；摇酒=分析想法选基酒（相关/随机/可调）→ 出配方 → 文案由主人侧模型按配方生成。
-import json, os, sys, random, argparse
+import json, os, sys, random, argparse, urllib.request, subprocess
+
+OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completions')
+BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
+INJECT = '/root/workspace/记忆档案/本地模型注入.py'
+
+def ollama(prompt, max_tokens=120):
+    """本地模型调用：带学习笔记注入。"""
+    head = ''
+    if os.path.exists(INJECT):
+        head = subprocess.run(['python3', INJECT], capture_output=True, text=True, timeout=30).stdout
+    body = {'model': BRAIN_MODEL, 'messages': [{'role': 'user', 'content': head + prompt}],
+            'max_tokens': max_tokens, 'stream': False}
+    req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req, timeout=180) as r:
+        return (json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip()
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BASES = json.load(open(os.path.join(HERE, '基酒.json'), encoding='utf-8'))
@@ -52,6 +67,7 @@ def main():
     ap.add_argument('--mode', choices=['auto', 'related', 'random', 'unrelated'], default='auto')
     ap.add_argument('--base', default='', help='指定基酒（逗号分隔，可调）')
     ap.add_argument('--ratio', default='3:2:1', help='混合比例')
+    ap.add_argument('--ollama', action='store_true', help='用本地模型做情绪分类并出文案初稿（带学习笔记注入）')
     args = ap.parse_args()
 
     found = classify(args.idea)
@@ -72,6 +88,15 @@ def main():
         '调制说明': '，'.join('%s %s 份' % (b, p) for b, p in zip(bases, parts + ['1'] * len(bases))) + '（基酒可按心情替换，可调）',
     }
     print(json.dumps(recipe, ensure_ascii=False, indent=1))
+
+    if args.ollama:
+        try:
+            cls = ollama('判断下面这句话的主要情绪，只输出一个 JSON 数组，元素从 喜 怒 忧 思 悲 恐 惊 见欲 听欲 香欲 味欲 触欲 意欲 里选 2-3 个：' + args.idea, 60)
+            print('[本地模型·情绪] ' + cls, file=sys.stderr)
+            draft = ollama('按配方（基酒 %s，比例 %s，原料 %s）为下面这句话写一段 60-90 字的中文文案，自然口吻，不带酒类比喻：%s' % ('、'.join(bases), args.ratio, args.原料, args.idea), 160)
+            print('[本地模型·文案初稿] ' + draft, file=sys.stderr)
+        except Exception as e:
+            print('[本地模型调用失败，回退关键词法] %s' % e, file=sys.stderr)
 
 if __name__ == '__main__':
     main()
