@@ -8,13 +8,13 @@ OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completion
 BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
 INJECT = '/root/workspace/记忆档案/本地模型注入.py'
 
-def ollama(prompt, max_tokens=120):
-    """本地模型调用：带学习笔记注入。"""
+def ollama(prompt, max_tokens=120, temperature=0.8):
+    """本地模型调用：带学习笔记注入；思维链不确定性（默认高温，接受发散）。"""
     head = ''
     if os.path.exists(INJECT):
         head = subprocess.run(['python3', INJECT], capture_output=True, text=True, timeout=30).stdout
     body = {'model': BRAIN_MODEL, 'messages': [{'role': 'user', 'content': head + prompt}],
-            'max_tokens': max_tokens, 'stream': False}
+            'max_tokens': max_tokens, 'temperature': temperature, 'stream': False}
     req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
     with urllib.request.urlopen(req, timeout=180) as r:
         return (json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip()
@@ -91,7 +91,7 @@ def main():
 
     if args.ollama:
         try:
-            cls = ollama('判断下面这句话的主要情绪，只输出一个 JSON 数组，元素从 喜 怒 忧 思 悲 恐 惊 见欲 听欲 香欲 味欲 触欲 意欲 里选 2-3 个：' + args.idea, 60)
+            cls = ollama('判断下面这句话的主要情绪，只输出一个 JSON 数组，元素从 喜 怒 忧 思 悲 恐 惊 见欲 听欲 香欲 味欲 触欲 意欲 里选 2-3 个：' + args.idea, 60, 0.2)
             print('[本地模型·情绪] ' + cls, file=sys.stderr)
             draft = ollama('按配方（基酒 %s，比例 %s，原料 %s）为下面这句话写一段 60-90 字的中文文案，自然口吻，不带酒类比喻：%s' % ('、'.join(bases), args.ratio, args.原料, args.idea), 160)
             print('[本地模型·文案初稿] ' + draft, file=sys.stderr)
