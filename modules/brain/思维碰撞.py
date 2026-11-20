@@ -98,15 +98,29 @@ import random, subprocess, datetime, urllib.request
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completions')
 BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
 
-def ollama_free(prompt, temperature=0.9):
-    """思维链不确定性：高温度自由联想，接受发散，不设唯一答案。"""
-    body = {'model': BRAIN_MODEL,
-            'messages': [{'role': 'user', 'content': prompt}],
-            'max_tokens': 48, 'temperature': temperature, 'stream': False}
-    req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(),
-                                 headers={'Content-Type': 'application/json'})
-    with urllib.request.urlopen(req, timeout=180) as r:
-        return (json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip()
+def ollama_free(prompt):
+    """量子不确定性：温度拉满 2.0、熵源随机种子、3 个叠加样本并行生成后随机坍缩取一。"""
+    import threading
+    samples = []
+    def _one():
+        try:
+            seed = int.from_bytes(os.urandom(4), 'big')
+            body = {'model': BRAIN_MODEL,
+                    'messages': [{'role': 'user', 'content': prompt}],
+                    'max_tokens': 48, 'temperature': 2.0, 'top_p': 0.99,
+                    'seed': seed, 'stream': False}
+            req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(),
+                                         headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=180) as r:
+                samples.append((json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip())
+        except Exception:
+            pass
+    ts = [threading.Thread(target=_one) for _ in range(3)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    return random.choice(samples) if samples else ''
 
 def run_spark(cands, top_pairs, n_random=4):
     report = {'通点广播': 0, '随机连接': 0}

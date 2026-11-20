@@ -91,9 +91,29 @@ def main():
 
     if args.ollama:
         try:
-            cls = ollama('判断下面这句话的主要情绪，只输出一个 JSON 数组，元素从 喜 怒 忧 思 悲 恐 惊 见欲 听欲 香欲 味欲 触欲 意欲 里选 2-3 个：' + args.idea, 60, 0.2)
+            cls = ollama('判断下面这句话的主要情绪，只输出一个 JSON 数组，元素从 喜 怒 忧 思 悲 恐 惊 见欲 听欲 香欲 味欲 触欲 意欲 里选 2-3 个：' + args.idea, 60, 0.8)
             print('[本地模型·情绪] ' + cls, file=sys.stderr)
-            draft = ollama('按配方（基酒 %s，比例 %s，原料 %s）为下面这句话写一段 60-90 字的中文文案，自然口吻，不带酒类比喻：%s' % ('、'.join(bases), args.ratio, args.原料, args.idea), 160)
+            draft = ''
+            import threading as _th
+            _samples = []
+            def _one():
+                try:
+                    seed = int.from_bytes(os.urandom(4), 'big')
+                    body = {'model': BRAIN_MODEL, 'messages': [{'role': 'user', 'content': prompt_d}],
+                            'max_tokens': 160, 'temperature': 2.0, 'top_p': 0.99, 'seed': seed, 'stream': False}
+                    req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(),
+                                                 headers={'Content-Type': 'application/json'})
+                    with urllib.request.urlopen(req, timeout=180) as r:
+                        _samples.append((json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip())
+                except Exception:
+                    pass
+            prompt_d = '按配方（基酒 %s，比例 %s，原料 %s）为下面这句话写一段 60-90 字的中文文案，自然口吻，不带酒类比喻：%s' % ('、'.join(bases), args.ratio, args.原料, args.idea)
+            ts = [_th.Thread(target=_one) for _ in range(2)]
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join()
+            draft = random.choice(_samples) if _samples else ''
             print('[本地模型·文案初稿] ' + draft, file=sys.stderr)
         except Exception as e:
             print('[本地模型调用失败，回退关键词法] %s' % e, file=sys.stderr)
