@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # 摇酒.py — 模拟大脑子项目「调酒器」的摇酒引擎。
-# 基酒=七情六欲；原料=人物设定卡；摇酒=分析想法选基酒（相关/随机/可调）→ 出配方 → 文案由主人侧模型按配方生成。
+# 基酒=七情六欲；原料=人物设定卡；摇酒=分析想法选基酒（相关/随机/可调）→ 出配方 → 文案由使用者侧模型按配方生成。
 import json, os, sys, random, argparse, urllib.request, subprocess
 
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completions')
