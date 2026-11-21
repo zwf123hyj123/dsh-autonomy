@@ -3,7 +3,7 @@
 # 思维碰撞.py — 模拟大脑的关联引擎：扫描记忆层+知识层，生成候选突触；反幻门过滤。
 import os, re, json, sys, time, glob
 
-ARCHIVE = '/root/workspace/记忆档案'
+ARCHIVE = os.environ.get('BRAIN_ROOT', os.path.expanduser('~/.dsh/brain'))
 REG = os.path.join(ARCHIVE, '发布清单.md')
 KNOW = os.path.join(ARCHIVE, '知识')
 SYN = os.path.join(ARCHIVE, '突触', 'synapses.jsonl')
@@ -130,7 +130,7 @@ def run_spark(cands, top_pairs, n_random=4):
         common = {}
         cp = os.path.join(os.path.dirname(SYN), '..', '..', '连续性', '断点', 'common.json')
         for p in (os.path.expanduser('~/.dsh/brain/连续性/断点/common.json'),
-                  '/root/workspace/记忆档案/连续性/断点/common.json', cp):
+                  os.path.join(ARCHIVE, '连续性', '断点', 'common.json'), cp):
             if os.path.exists(p):
                 try:
                     common = json.load(open(p, encoding='utf-8'))

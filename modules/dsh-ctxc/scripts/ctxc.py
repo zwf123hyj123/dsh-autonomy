@@ -25,8 +25,8 @@ LOCAL_API = os.environ.get("CTXC_API", "http://127.0.0.1:11436/v1/chat/completio
 LOCAL_MODEL = os.environ.get("CTXC_MODEL", "qwen2.5:1.5b-instruct")
 LOCAL_MAX = int(os.environ.get("CTXC_LOCAL_MAX", "2600"))
 SMALL_KEEP = int(os.environ.get("CTXC_SMALL_KEEP", "120"))
-STATE_DIR = os.environ.get("CTXC_STATE_DIR", "/root/workspace/记忆档案/连续性/断点")
-EVENT_LOG = os.environ.get("CTXC_EVENT_LOG", "/root/workspace/记忆档案/连续性/压缩事件.jsonl")
+STATE_DIR = os.environ.get("CTXC_STATE_DIR", os.path.join(os.path.expanduser("~"), ".dsh", "brain", "连续性", "断点"))
+EVENT_LOG = os.environ.get("CTXC_EVENT_LOG", os.path.join(os.path.expanduser("~"), ".dsh", "brain", "连续性", "压缩事件.jsonl"))
 COMMON = os.path.join(STATE_DIR, "common.json")  # 上下通点索引：跨输入的上下文共通点断法
 
 def norm_hash(text):

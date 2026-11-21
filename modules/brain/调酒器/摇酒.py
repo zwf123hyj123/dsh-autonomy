@@ -6,7 +6,7 @@ import json, os, sys, random, argparse, urllib.request, subprocess
 
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completions')
 BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
-INJECT = '/root/workspace/记忆档案/本地模型注入.py'
+INJECT = os.path.join(os.environ.get('BRAIN_ROOT', os.path.expanduser('~/.dsh/brain')), '本地模型注入.py')
 
 def ollama(prompt, max_tokens=120, temperature=0.8):
     """本地模型调用：带学习笔记注入；思维链不确定性（默认高温，接受发散）。"""

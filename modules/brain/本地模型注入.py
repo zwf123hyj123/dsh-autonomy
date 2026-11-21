@@ -10,7 +10,7 @@ def prompt_head(role='助手'):
         note = open(NOTE, encoding='utf-8').read()
     except Exception:
         note = ''
-    return '你是主人的%s。以下是你已学习过的知识要点（滚动笔记）：\n%s\n现在回答下面的任务，只基于学习笔记与任务本身，不编造笔记里没有的事实。\n' % (role, note[:1500])
+    return '你是使用者的%s。以下是你已学习过的知识要点（滚动笔记）：\n%s\n现在回答下面的任务，只基于学习笔记与任务本身，不编造笔记里没有的事实。\n' % (role, note[:1500])
 
 if __name__ == '__main__':
     print(prompt_head())

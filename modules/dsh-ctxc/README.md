@@ -7,7 +7,7 @@
 
 ## 安装
 
-仓库：https://github.com/zwf123hyj123/-dsh-ctxc
+仓库：本仓库（dsh-ctxc，随 dsh-autonomy 一并分发）
 
 需要一台跑着 dsh-go 的主机和一个 Ollama 服务（本机或局域网，OpenAI 兼容端点）。
 
