@@ -11,7 +11,9 @@ CAND = os.path.join(ARCHIVE, '突触')
 
 SPARK = os.path.join(os.path.dirname(SYN), '火花-' + time.strftime('%Y-%m-%d') + '.jsonl')
 STATE = os.path.join(os.path.dirname(SYN), '.count.json')
-FRAGMENTS = {'每轮对话', '后自动滚', '原文已归', '压缩失败', '知识', '一句话', '以下是', '好的', '可以'}
+FRAGMENTS = {'每轮对话', '后自动滚', '原文已归', '压缩失败', '知识', '一句话', '以下是', '好的', '可以',
+             '后自动追', '收件箱每', '收件箱会', '阶段一', '不改旧行', '只记要点', '与出处', '继续任务',
+             '需求', '子代理', 'dev', 'tmp', 'job', 'item', '未知', '可能', '没有', '什么'}
 
 def is_quality(rec):
     """质量门：text >= 2 字符、from/to >= 2 字符、to 不是碎片词"""
@@ -20,8 +22,8 @@ def is_quality(rec):
     frm = str(rec.get('from', '')).strip()
     if len(text) < 2:
         return False
-    if len(to) < 2 or len(frm) < 2:
-        return False
+    if len(to) < 3 or len(frm) < 3:
+        return False  # 实体至少 3 字；2 字多为分词碎片
     if to in FRAGMENTS or frm in FRAGMENTS:
         return False
     return True
@@ -125,8 +127,25 @@ def main():
     out = os.path.join(CAND, '候选-' + time.strftime('%Y-%m-%d') + '.json')
     json.dump(cands, open(out, 'w'), ensure_ascii=False, indent=1)
 
+    # ── 真突触：有来源的共现（cooccur）才写 synapses ────────────
+    try:
+        confirmed = [c for c in cands if c.get('count', 0) >= 2 and c.get('source')]
+        with open(SYN, 'a', encoding='utf-8') as f:
+            for c in confirmed[:20]:
+                rec = {'at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                       'from': c['from'], 'to': c['to'], 'rel': 'cooccur',
+                       'text': '共现 %d 次 | 来源：%s' % (c['count'], os.path.basename(c['source'])),
+                       'count': c['count']}
+                if is_quality(rec) and c['to'] not in FRAGMENTS and len(str(c['to'])) >= 3:
+                    f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
+
     # ── 火花阶段：通点广播 + 随机突触随机连接（悟）────────────
-    spark = run_spark(cands, top)
+    if '--no-spark' not in sys.argv:
+        spark = run_spark(cands, top)
+    else:
+        spark = {'跳过': 'no-spark'}
     check_shrink()
     print(json.dumps({
         '白名单实体': sorted(whitelist),
@@ -183,7 +202,8 @@ def run_spark(cands, top_pairs, n_random=2):
                     pass
                 if common:
                     break
-        nodes = [c['to'] for c in cands] + [c['from'] for c in cands]
+        # 只取实体（白名单 from）；cands 的 to 是分词碎片，不能当突触节点
+        nodes = list(dict.fromkeys(c['from'] for c in cands))
         with open(SPARK, 'a', encoding='utf-8') as f:
             for h, val in list(common.items())[:5]:
                 txt = str(val).strip()
@@ -220,7 +240,8 @@ def run_spark(cands, top_pairs, n_random=2):
                 idea = ''
             if idea:
                 lines.append('- %s ↔ %s → %s' % (a, b, idea))
-                with open(SYN, 'a', encoding='utf-8') as f:
+                # 火花不是突触：spark_random 只进灵感文件，不写 synapses（2026-11-25 修正）
+                with open(SPARK, 'a', encoding='utf-8') as f:
                     f.write(json.dumps({'at': time.strftime('%Y-%m-%d %H:%M:%S'),
                                         'from': a, 'to': b, 'rel': 'spark_random',
                                         'text': idea}, ensure_ascii=False) + '\n')
