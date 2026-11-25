@@ -7,7 +7,7 @@ ARCH = '/root/workspace/记忆档案'
 KNOW = os.path.join(ARCH, '知识')
 SRC = re.compile(r'来源[:：]|出处|https?://')
 SELF = re.compile(r'我的总结|自拆|二次推理|读本|判据体检|判据速查|动态|对话记录|采集与学习索引|回声|我的|自评|改进建议|缺口清单|镜片|阵营图|敌友矩阵|五问')
-OWN = re.compile(r'引路人[：:]|ta[：:]|我的判断|我的总结|我推|我的产|我说|我写|我整理')
+OWN = re.compile(r'维护者[：:]|ta[：:]|我的判断|我的总结|我推|我的产|我说|我写|我整理')
 INTEL = re.compile(r'^\d{4}-\d{2}-\d{2}-')
 
 def main():

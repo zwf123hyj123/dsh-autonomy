@@ -73,7 +73,7 @@ def with_summary(ks):
     return sum(1 for f in ks if d.get(os.path.basename(f), {}).get('summary'))
 
 def disposition(ks):
-    """处置率：每条知识必须有处置（remember/keep/drop），零积压 = 100%（引路人 2026-11-25 11:59 原话）。"""
+    """处置率：每条知识必须有处置（remember/keep/drop），零积压 = 100%（维护者 2026-11-25 定）。"""
     try:
         d = json.load(open('/root/workspace/记忆档案/知识/.digested.json', encoding='utf-8'))
     except Exception:
@@ -108,7 +108,7 @@ def main():
         '转化率(全部知识)': '%.0f%%' % rate_all,
         '转化率(按总结算)': '%.0f%%' % (ws / len(ks) * 100 if ks else 0),
         '转化率(高分候选)': '%.0f%%' % rate_hv,
-        '目标': '100%（引路人 2026-11-25：最终是100%的转化率=零积压）',
+        '目标': '100%（目标：最终100%转化率=零积压）',
         '判据': '主判据=处置率（每条知识 remember/keep/drop 三选一，不留悬案）；按总结算=消化参考；高分候选=参考',
         '结论': '达标：零积压' if rate_disp >= 100 else '未达标：%.0f%% 条知识没处置' % (100 - rate_disp),
     }, ensure_ascii=False))
