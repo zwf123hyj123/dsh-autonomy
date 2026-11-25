@@ -6,7 +6,7 @@
   python3 工具体检.py                # 检查全部会话，输出汇总
   python3 工具体检.py <session-id前13位>  # 只查一个会话
 """
-import sys, os, json, subprocess, glob
+import sys, os, json, subprocess, glob, time
 from collections import defaultdict
 
 SESS_ROOT = os.path.expanduser('~/.dsh/sessions')
@@ -76,8 +76,90 @@ def fmt_report(res, path):
             lines.append('  | %s | %d | %d |' % (name, st['calls'], st['results']))
     return '\n'.join(lines)
 
+# ---------- 修复 ----------
+import shutil
+
+def read_raw_events(path):
+    """返回 [(raw_line, event)]，保持原顺序"""
+    out = []
+    p = subprocess.Popen(['zstd', '-dc', path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    for raw in p.stdout:
+        txt = raw.decode('utf-8', errors='replace').rstrip('\n')
+        try:
+            out.append((txt, json.loads(txt)))
+        except Exception:
+            out.append((txt, None))
+    p.wait()
+    return out
+
+def fix_session(path):
+    """给悬空 tool/call 补一条失败 result。返回 (修复数, 说明)"""
+    items = read_raw_events(path)
+    calls, results = {}, set()
+    max_seq = 0
+    for txt, ev in items:
+        if not ev:
+            continue
+        max_seq = max(max_seq, int(ev.get('seq') or 0))
+        t = ev.get('type'); d = ev.get('data') or {}
+        if t == 'tool/call':
+            cid = d.get('callId')
+            if cid: calls[cid] = {'name': d.get('name') or '?', 'turn': d.get('turn'), 'step': d.get('step')}
+        elif t == 'tool/result':
+            msg = d.get('message') or {}
+            cid = msg.get('toolCallId') or (msg.get('source') or {}).get('callId')
+            if cid: results.add(cid)
+    dangling = [cid for cid in calls if cid not in results]
+    if not dangling:
+        return 0, '没有悬空调用'
+    # 备份
+    bak = path + '.bak-fix-' + time.strftime('%Y%m%d-%H%M%S')
+    shutil.copy2(path, bak)
+    # 组装新事件
+    new_lines = []
+    seq = max_seq
+    for cid in dangling:
+        info = calls[cid]
+        seq += 1
+        ev = {
+            'type': 'tool/result',
+            'seq': seq,
+            'time': time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime()),
+            'data': {
+                'turn': info.get('turn'),
+                'step': info.get('step'),
+                'message': {
+                    'role': 'tool',
+                    'toolCallId': cid,
+                    'source': {'kind': 'tool', 'callId': cid},
+                    'content': [{'type': 'text', 'text': '[修复] 调用被中断，未返回结果（工具体检补写）'}],
+                },
+                'meta': {'repairedBy': 'tools-check', 'note': 'dangling tool call repaired'},
+            },
+        }
+        new_lines.append(json.dumps(ev, ensure_ascii=False))
+    # 写临时文件再原子替换
+    tmp = path + '.tmp-fix'
+    p = subprocess.Popen(['zstd', '-q', '-f', '-o', tmp], stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    for txt, _ in items:
+        p.stdin.write((txt + '\n').encode('utf-8'))
+    for line in new_lines:
+        p.stdin.write((line + '\n').encode('utf-8'))
+    p.stdin.close(); p.wait()
+    if p.returncode != 0:
+        return 0, '重新压缩失败，已保留备份'
+    # 验证
+    res = check_session(tmp)
+    if res['dangling']:
+        os.remove(tmp)
+        return 0, '验证仍有悬空（%d），未替换' % len(res['dangling'])
+    shutil.move(tmp, path)
+    return len(dangling), '已补 %d 条失败结果；备份 %s' % (len(dangling), os.path.basename(bak))
+
 def main():
-    target = sys.argv[1] if len(sys.argv) > 1 else None
+    args = [a for a in sys.argv[1:] if a != '--fix']
+    do_fix = '--fix' in sys.argv
+    target = args[0] if args else None
     paths = sorted(glob.glob(os.path.join(SESS_ROOT, '*', 'session-*', 'session.v4.jsonl.zstd')))
     if target:
         paths = [p for p in paths if target in p]
@@ -99,8 +181,18 @@ def main():
             print('')
     print('---')
     print('汇总：悬空调用 %d，孤儿结果 %d' % (total_dangling, total_orphans))
-    if total_dangling or total_orphans:
+    if do_fix:
+        print('')
+        print('## 修复模式')
+        if not target:
+            print('- 修复需要指定会话（sid 前 13 位），避免误改正在运行的会话。')
+        else:
+            for p in paths:
+                n, note = fix_session(p)
+                print('- %s：%s' % (os.path.basename(os.path.dirname(p))[:13], note))
+    elif total_dangling or total_orphans:
         print('修复建议：对悬空调用，可在下一次会话恢复时补一条「失败」结果或让调用方重试；不要手改日志。')
+        print('（要真修：python3 工具体检.py <sid前13位> --fix）')
     else:
         print('全部配对正常。')
 
