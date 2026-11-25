@@ -79,10 +79,11 @@ def load_whitelist():
     return names
 
 def scan_files():
+    META = ('采集与学习索引', '我的总结', '采集约定', '分区')
     files = []
     # 会话卡不再参与共现（含系统提示词噪音）；只扫知识层与项目文档
     for pat in [KNOW + '/*.md', ARCHIVE + '/项目/*/*/*.md', ARCHIVE + '/连续性/未归档/*.md']:
-        files += glob.glob(pat)
+        files += [f for f in glob.glob(pat) if not any(m in os.path.basename(f) for m in META)]
     return files
 
 def build_entities():
@@ -109,7 +110,8 @@ def build_entities():
             'Achieves', 'Agency', 'Advice', 'Amended', 'Anti', 'Apex', 'Agents', 'Agent',
             'Model', 'Models', 'Data', 'Time', 'Type', 'Text', 'File', 'Content', 'Name',
             'Path', 'Error', 'Status', 'Item', 'Job', 'User', 'True', 'False', 'None',
-            'http', 'https', 'shtml', 'html', 'www', 'com', 'org'}
+            'http', 'https', 'shtml', 'html', 'www', 'com', 'org',
+            'root', 'workspace', 'auto', 'home', 'tmp', 'usr', 'kepu', 'lives', 'news', 'shtml'}
     def _entity_like(e):
         if not e or len(e) < 3:
             return False
