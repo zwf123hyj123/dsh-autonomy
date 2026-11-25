@@ -104,12 +104,16 @@ def build_entities():
                 continue
             ents |= set(re.findall(r'\bdsh-[a-z0-9-]{2,}\b', txt))
             ents |= set(re.findall(r'\b[A-Z][a-zA-Z]{4,}\b', txt))
+            # 2026-11-25 补：带连字符的专名（MNN-Pocket）、全大写缩写（SAGE）
+            ents |= set(re.findall(r'\b[A-Z][a-zA-Z]{1,}(?:[-_][a-zA-Z0-9]+)+\b', txt))
+            ents |= set(re.findall(r'\b[A-Z]{2,6}\b', txt))
     except Exception:
         pass
     STOP = {'The', 'And', 'This', 'That', 'With', 'For', 'From', 'Action', 'Actions', 'Article',
             'Achieves', 'Agency', 'Advice', 'Amended', 'Anti', 'Apex', 'Agents', 'Agent',
             'Model', 'Models', 'Data', 'Time', 'Type', 'Text', 'File', 'Content', 'Name',
             'Path', 'Error', 'Status', 'Item', 'Job', 'User', 'True', 'False', 'None',
+            'THE', 'AND', 'THIS', 'THAT', 'WITH', 'FOR', 'FROM', 'NOT', 'YOU', 'ALL', 'CAN', 'ARE', 'WAS', 'HAS', 'BUT', 'OUR', 'OUT', 'ONE', 'TWO',
             'http', 'https', 'shtml', 'html', 'www', 'com', 'org',
             'root', 'workspace', 'auto', 'home', 'tmp', 'usr', 'kepu', 'lives', 'news', 'shtml'}
     def _entity_like(e):
@@ -137,6 +141,7 @@ def keywords(text, entities=None):
     stop = {'the', 'and', 'this', 'that', 'with', 'for', 'from', 'json', 'bash', 'echo', 'true', 'false',
             'path', 'type', 'text', 'file', 'content', 'name', 'data', 'time', 'item', 'job', 'user',
             'python3', 'python', 'node', 'scheduled', 'background', 'null', 'none', 'error', 'status',
+            'auto', 'root', 'workspace', 'kepu', 'lives', 'news', 'shtml', 'xljk', 'home', 'tmp', 'usr',
             'This', 'this', 'message', 'REMINDER', 'SCHEDULE', 'reminder'}
     return {w for w in ws if w not in stop and len(w) >= 3}
 
