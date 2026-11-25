@@ -77,19 +77,48 @@ def load_whitelist():
 
 def scan_files():
     files = []
-    for pat in [KNOW + '/*.md', ARCHIVE + '/项目/*/*/*.md', ARCHIVE + '/连续性/会话卡/*.md', ARCHIVE + '/连续性/未归档/*.md']:
+    # 会话卡不再参与共现（含系统提示词噪音）；只扫知识层与项目文档
+    for pat in [KNOW + '/*.md', ARCHIVE + '/项目/*/*/*.md', ARCHIVE + '/连续性/未归档/*.md']:
         files += glob.glob(pat)
     return files
 
-def keywords(text):
-    # 中文 2-4 字词（粗粒度）+ 英文/数字标识符
-    ws = set(re.findall(r'[\u4e00-\u9fa5]{2,4}', text))
-    ws |= set(re.findall(r'[A-Za-z][A-Za-z0-9_-]{2,20}', text))
-    stop = {'这个', '一个', '我们', '可以', '进行', '通过', '需要', '就是', '没有', '不是', '之后', '以后', 'the', 'and', 'this', 'that', 'with', 'for', 'from', 'json', 'bash', 'echo', 'true', 'false'}
-    return {w for w in ws if w not in stop}
+def build_entities():
+    """实体词典：专名才算实体（项目名/工具名/英文标识符），不做 2-4 字中文通配。"""
+    ents = set()
+    try:
+        txt = open(REG, encoding='utf-8').read()
+        for m in re.finditer(r'\|\s*([\u4e00-\u9fa5A-Za-z0-9_-]{2,20})\s*\|', txt):
+            ents.add(m.group(1))
+    except Exception:
+        pass
+    try:
+        for d in os.listdir(os.path.join(ARCHIVE, '项目')):
+            ents.add(d)
+    except Exception:
+        pass
+    ents |= {'Ollama', 'EigenFlux', 'DeepSeek', 'GLM', 'ChatAnywhere', 'SiliconFlow',
+             'dsh-ctxc', 'dsh-autonomy', 'dsh-knowledge', 'dsh-go', 'local-ctxc',
+             'local-load-ease', 'local-ops-tune', 'fusion-assistant', 'DSH', 'Claude', 'GPT',
+             '海马体', '突触', '调酒器', '酒架', '模拟大脑', '德缪哥矩阵'}
+    return {e for e in ents if e and len(e) >= 3}
+
+def keywords(text, entities=None):
+    """只提实体：词典里的专名 + 英文标识符。不再做中文 2-4 字通配（那是碎片之源）。"""
+    ws = set()
+    if entities:
+        for e in entities:
+            if e and e in text:
+                ws.add(e)
+    ws |= set(re.findall(r'[A-Za-z][A-Za-z0-9_-]{3,20}', text))
+    stop = {'the', 'and', 'this', 'that', 'with', 'for', 'from', 'json', 'bash', 'echo', 'true', 'false',
+            'path', 'type', 'text', 'file', 'content', 'name', 'data', 'time', 'item', 'job', 'user',
+            'python3', 'python', 'node', 'scheduled', 'background', 'null', 'none', 'error', 'status',
+            'This', 'this', 'message', 'REMINDER', 'SCHEDULE', 'reminder'}
+    return {w for w in ws if w not in stop and len(w) >= 3}
 
 def main():
     whitelist = load_whitelist()
+    entities = build_entities()
     files = scan_files()
     cooc = {}       # (entity, kw) -> {count, source}
     suspicious = {} # 清单外像项目名的名字 -> sources
@@ -98,7 +127,7 @@ def main():
             txt = open(f, encoding='utf-8').read()[-8000:]
         except Exception:
             continue
-        kws = keywords(txt)
+        kws = keywords(txt, entities)
         for e in whitelist:
             if e in txt:
                 for k in kws:
@@ -130,8 +159,20 @@ def main():
     # ── 真突触：有来源的共现（cooccur）才写 synapses ────────────
     try:
         confirmed = [c for c in cands if c.get('count', 0) >= 2 and c.get('source')]
+        existing = set()
+        try:
+            for line in open(SYN, encoding='utf-8'):
+                try:
+                    d0 = json.loads(line)
+                    existing.add((d0.get('from'), d0.get('to')))
+                except Exception:
+                    pass
+        except FileNotFoundError:
+            pass
         with open(SYN, 'a', encoding='utf-8') as f:
             for c in confirmed[:20]:
+                if (c['from'], c['to']) in existing:
+                    continue
                 rec = {'at': time.strftime('%Y-%m-%d %H:%M:%S'),
                        'from': c['from'], 'to': c['to'], 'rel': 'cooccur',
                        'text': '共现 %d 次 | 来源：%s' % (c['count'], os.path.basename(c['source'])),
