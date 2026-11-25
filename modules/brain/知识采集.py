@@ -6,7 +6,10 @@
 import os, sys, argparse, subprocess, datetime, hashlib
 
 HOME = os.path.expanduser('~')
-ROOT = os.environ.get('BRAIN_ROOT', os.path.join(HOME, '.dsh', 'brain'))
+# 2026-11-25 修：默认写到 ~/.dsh/brain，但真实知识库在 /root/workspace/记忆档案
+# （定时任务 prompt 里写了 BRAIN_ROOT，直接跑脚本时没有 → 写错地方）。改为自动探测。
+_CANDIDATES = ['/root/workspace/记忆档案', os.path.join(HOME, '.dsh', 'brain')]
+ROOT = os.environ.get('BRAIN_ROOT') or next((p for p in _CANDIDATES if os.path.isdir(p)), _CANDIDATES[-1])
 KNOW = os.path.join(ROOT, '知识')
 RAW = os.path.join(KNOW, '原始')
 DEFAULT_CTXC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'dsh-ctxc', 'scripts', 'ctxc.py')
