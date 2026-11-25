@@ -62,8 +62,14 @@ def main():
         if h not in cache:
             need.append(it['text'])
     vecs_new = []
+    import time as _t
+    _t0 = _t.time()
+    _batches = (len(need) + 15) // 16
     for b in range(0, len(need), 16):
         vecs_new += embed(need[b:b + 16])
+        print('[向量] 第 %d/%d 批（%d/%d 块，%.0fs）' % (
+            b // 16 + 1, _batches, min(b + 16, len(need)), len(need), _t.time() - _t0),
+            file=sys.stderr, flush=True)
     idx_new = 0
     vecs = []
     for it in items:
