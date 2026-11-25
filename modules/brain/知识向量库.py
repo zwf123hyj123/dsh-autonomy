@@ -45,12 +45,36 @@ def main():
         for i, ch in enumerate(chunks_of(txt)):
             items.append({'id': '%s#%d' % (title, i), 'text': ch[:1000]})
     os.makedirs(RAG, exist_ok=True)
-    texts = [it['text'] for it in items]
+    # 2026-11-25 改增量：读旧库按 text hash 复用向量，只 embed 新/变更块
+    # （原来全量 256 块 × 1-2 秒 = 4-8 分钟，超过 300s 超时重建不完）
+    import hashlib as _hl
+    cache = {}
+    try:
+        _old = json.load(open(VEC, encoding='utf-8'))
+        for _it in _old.get('items', []):
+            if _it.get('text') and _it.get('vec'):
+                cache[_hl.sha256(_it['text'].encode()).hexdigest()] = _it['vec']
+    except Exception:
+        pass
+    need = []
+    for it in items:
+        h = _hl.sha256(it['text'].encode()).hexdigest()
+        if h not in cache:
+            need.append(it['text'])
+    vecs_new = []
+    for b in range(0, len(need), 16):
+        vecs_new += embed(need[b:b + 16])
+    idx_new = 0
     vecs = []
-    for b in range(0, len(texts), 16):
-        vecs += embed(texts[b:b + 16])
+    for it in items:
+        h = _hl.sha256(it['text'].encode()).hexdigest()
+        if h in cache:
+            vecs.append(cache[h])
+        else:
+            vecs.append(vecs_new[idx_new]); idx_new += 1
     store = {'built_at': datetime.datetime.now().isoformat(), 'emb_model': EMB,
              'items': [{'id': it['id'], 'text': it['text'], 'vec': v} for it, v in zip(items, vecs)]}
+    print('增量：复用 %d / 新增 %d' % (len(items) - len(need), len(need)), file=sys.stderr)
     tmp = VEC + '.tmp'
     json.dump(store, open(tmp, 'w'), ensure_ascii=False)
     os.replace(tmp, VEC)
