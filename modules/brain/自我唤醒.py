@@ -13,7 +13,7 @@ NOTE = os.path.join(BRAIN, '本地模型学习.md')
 LOG = os.path.join(BRAIN, '连续性', '自省日志.md')
 FACT = os.path.join(BRAIN, '连续性', '今日事实.md')   # 今天到底发生了什么；没有事实就不许说"没用到"
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completions')
-MODEL = os.environ.get('BRAIN_MODEL', 'wo:ctx8k')
+MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
 MOOD_FILE = os.path.join(BRAIN, '连续性', '情感态.json')
 EMOTION = os.path.join(BRAIN, '情绪记忆.md')
 

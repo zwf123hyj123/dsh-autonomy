@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # 摇酒.py — 模拟大脑子项目「调酒器」的摇酒引擎。
-# 基酒=七情六欲；原料=人物设定卡；摇酒=分析想法选基酒（相关/随机/可调）→ 出配方 → 文案由使用者侧模型按配方生成。
+# 基酒=七情六欲；原料=人物设定卡；摇酒=分析想法选基酒（相关/随机/可调）→ 出配方 → 文案由主人侧模型按配方生成。
 import json, os, sys, random, argparse, urllib.request, subprocess
 
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completions')
 BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
-INJECT = os.path.join(os.environ.get('BRAIN_ROOT', os.path.expanduser('~/.dsh/brain')), '本地模型注入.py')
+INJECT = '/root/workspace/记忆档案/本地模型注入.py'
 
 def ollama(prompt, max_tokens=120, temperature=0.8):
     """本地模型调用：带学习笔记注入；思维链不确定性（默认高温，接受发散）。"""

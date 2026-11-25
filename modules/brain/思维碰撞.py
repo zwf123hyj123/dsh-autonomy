@@ -232,7 +232,7 @@ def main():
 import random, subprocess, datetime, urllib.request
 
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completions')
-BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'wo')
+BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
 
 def ollama_free(prompt):
     """量子不确定性：温度拉满 2.0、熵源随机种子、3 个叠加样本并行生成后随机坍缩取一。"""
