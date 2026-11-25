@@ -3,11 +3,55 @@
 # 思维碰撞.py — 模拟大脑的关联引擎：扫描记忆层+知识层，生成候选突触；反幻门过滤。
 import os, re, json, sys, time, glob
 
-ARCHIVE = os.environ.get('BRAIN_ROOT', os.path.expanduser('~/.dsh/brain'))
+ARCHIVE = '/root/workspace/记忆档案'
 REG = os.path.join(ARCHIVE, '发布清单.md')
 KNOW = os.path.join(ARCHIVE, '知识')
 SYN = os.path.join(ARCHIVE, '突触', 'synapses.jsonl')
 CAND = os.path.join(ARCHIVE, '突触')
+
+SPARK = os.path.join(os.path.dirname(SYN), '火花-' + time.strftime('%Y-%m-%d') + '.jsonl')
+STATE = os.path.join(os.path.dirname(SYN), '.count.json')
+FRAGMENTS = {'每轮对话', '后自动滚', '原文已归', '压缩失败', '知识', '一句话', '以下是', '好的', '可以'}
+
+def is_quality(rec):
+    """质量门：text >= 2 字符、from/to >= 2 字符、to 不是碎片词"""
+    text = str(rec.get('text', '')).strip()
+    to = str(rec.get('to', '')).strip()
+    frm = str(rec.get('from', '')).strip()
+    if len(text) < 2:
+        return False
+    if len(to) < 2 or len(frm) < 2:
+        return False
+    if to in FRAGMENTS or frm in FRAGMENTS:
+        return False
+    return True
+
+def write_errata(note):
+    """删除/缩水必须留勘误（反幻门自己也要过反幻门）"""
+    try:
+        path = os.path.join(os.path.dirname(SYN), '勘误-' + time.strftime('%Y-%m-%d') + '.md')
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write('- %s %s\n' % (time.strftime('%H:%M:%S'), note))
+    except Exception:
+        pass
+
+def check_shrink():
+    """对比上次条数，缩水就记勘误"""
+    try:
+        cur = sum(1 for _ in open(SYN, encoding='utf-8'))
+    except FileNotFoundError:
+        cur = 0
+    prev = None
+    try:
+        prev = json.load(open(STATE)).get('count')
+    except Exception:
+        pass
+    if prev is not None and cur < prev:
+        write_errata('突触减少 %d → %d（可能被脚本重建/清洗）' % (prev, cur))
+    try:
+        json.dump({'count': cur, 'at': time.strftime('%Y-%m-%d %H:%M:%S')}, open(STATE, 'w'))
+    except Exception:
+        pass
 
 def load_whitelist():
     """白名单：发布清单项目名 + 项目目录名 + 记忆档案已知项目。"""
@@ -83,6 +127,7 @@ def main():
 
     # ── 火花阶段：通点广播 + 随机突触随机连接（悟）────────────
     spark = run_spark(cands, top)
+    check_shrink()
     print(json.dumps({
         '白名单实体': sorted(whitelist),
         '扫描文件': len(files),
@@ -96,7 +141,7 @@ def main():
 import random, subprocess, datetime, urllib.request
 
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completions')
-BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
+BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'wo')
 
 def ollama_free(prompt):
     """量子不确定性：温度拉满 2.0、熵源随机种子、3 个叠加样本并行生成后随机坍缩取一。"""
@@ -111,18 +156,18 @@ def ollama_free(prompt):
                     'seed': seed, 'stream': False}
             req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(),
                                          headers={'Content-Type': 'application/json'})
-            with urllib.request.urlopen(req, timeout=180) as r:
+            with urllib.request.urlopen(req, timeout=60) as r:
                 samples.append((json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip())
         except Exception:
             pass
-    ts = [threading.Thread(target=_one) for _ in range(3)]
+    ts = [threading.Thread(target=_one) for _ in range(2)]
     for t in ts:
         t.start()
     for t in ts:
         t.join()
     return random.choice(samples) if samples else ''
 
-def run_spark(cands, top_pairs, n_random=4):
+def run_spark(cands, top_pairs, n_random=2):
     report = {'通点广播': 0, '随机连接': 0}
     os.makedirs(SYN.rstrip('synapses.jsonl'), exist_ok=True)
     try:
@@ -130,7 +175,7 @@ def run_spark(cands, top_pairs, n_random=4):
         common = {}
         cp = os.path.join(os.path.dirname(SYN), '..', '..', '连续性', '断点', 'common.json')
         for p in (os.path.expanduser('~/.dsh/brain/连续性/断点/common.json'),
-                  os.path.join(ARCHIVE, '连续性', '断点', 'common.json'), cp):
+                  '/root/workspace/记忆档案/连续性/断点/common.json', cp):
             if os.path.exists(p):
                 try:
                     common = json.load(open(p, encoding='utf-8'))
@@ -139,14 +184,30 @@ def run_spark(cands, top_pairs, n_random=4):
                 if common:
                     break
         nodes = [c['to'] for c in cands] + [c['from'] for c in cands]
-        with open(SYN, 'a', encoding='utf-8') as f:
+        with open(SPARK, 'a', encoding='utf-8') as f:
             for h, val in list(common.items())[:5]:
+                txt = str(val).strip()
+                if len(txt) < 2:
+                    continue  # 质量门：空共通点不发
                 for node in list(dict.fromkeys(nodes))[:12]:
-                    f.write(json.dumps({'at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                                        'from': '共通点:' + h, 'to': node,
-                                        'rel': 'spark_common', 'text': str(val)[:60]},
-                                       ensure_ascii=False) + '\n')
-                    report['通点广播'] += 1
+                    node = str(node).strip()
+                    if len(node) < 2 or node in FRAGMENTS:
+                        continue
+                    rec = {'at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                           'from': '共通点:' + h, 'to': node,
+                           'rel': 'spark_common', 'text': txt[:60]}
+                    if is_quality(rec):
+                        f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+                        report['通点广播'] += 1
+        # 1.5 神经交流：调神经突触.py（可塑权重网络：赫布学习+衰减+不应期+胜者通吃）
+        try:
+            r = subprocess.run(['python3', os.path.join(os.path.dirname(os.path.abspath(__file__)), '神经突触.py')],
+                               capture_output=True, text=True, timeout=300)
+            if r.returncode == 0 and r.stdout.strip():
+                j = json.loads(r.stdout)
+                report['神经发放'] = '%d 节点 · 路径: %s' % (j.get('发放', 0), j.get('路径', '')[:60])
+        except Exception:
+            pass
         # 2. 悟：随机突触随机连接，本地模型自由联想
         pairs = [(a, b) for i, a in enumerate(nodes) for b in nodes[i + 1:]]
         random.shuffle(pairs)
@@ -164,9 +225,9 @@ def run_spark(cands, top_pairs, n_random=4):
                                         'from': a, 'to': b, 'rel': 'spark_random',
                                         'text': idea}, ensure_ascii=False) + '\n')
                 report['随机连接'] += 1
-        if lines:
-            with open(ins_file, 'w', encoding='utf-8') as f:
-                f.write('# 灵感火花（%s）\n\n' % time.strftime('%Y-%m-%d') + '\n'.join(lines) + '\n')
+        with open(ins_file, 'w', encoding='utf-8') as f:
+            f.write('# 灵感火花（%s）\n\n' % time.strftime('%Y-%m-%d'))
+            f.write('\n'.join(lines) + '\n' if lines else '（本轮无火花：模型离线或无有效配对）\n')
     except Exception as ex:
         report['错误'] = str(ex)[:120]
     return report
