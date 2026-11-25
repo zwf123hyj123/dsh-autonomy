@@ -79,7 +79,7 @@ def main():
         _r = _sp.run(['python3', '/root/workspace/记忆档案/查.py', query],
                      capture_output=True, text=True, timeout=20)
         for _line in (_r.stdout or '').splitlines():
-            _m = re.match(r'[\d.]+\s*\|\s*([^#|]+)', _line)
+            _m = re.match(r'^\d+\s+(\S+\.md)', _line)
             if _m:
                 kw_files.append(_m.group(1).strip())
     except Exception:
@@ -94,6 +94,7 @@ def main():
     for kf in kw_files:
         if printed >= topk + 2:
             break
+        kf = kf.replace('知识/', '').replace('.md', '')
         if kf in seen_ids:
             continue
         for it in store['items']:
