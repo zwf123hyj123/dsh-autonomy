@@ -233,8 +233,11 @@ def main():
         pass
 
     # ── 火花阶段：通点广播 + 随机突触随机连接（悟）────────────
+    # 三档模式（维护者 2026-11-25）：激烈=轻度疯狂 / 恍惚=中度 / 疯狂=重度
+    _mode = pick_mode(sys.argv)
     if '--no-spark' not in sys.argv:
-        spark = run_spark(cands, top)
+        _pool = list(entities) if _mode else None
+        spark = run_spark(cands, top, mode=_mode, nodes_override=_pool)
     else:
         spark = {'跳过': 'no-spark'}
     check_shrink()
@@ -257,14 +260,19 @@ CLOUD_API = os.environ.get('CTXC_CLOUD_API', 'http://127.0.0.1:18326/v1/chat/com
 CLOUD_KEY = os.environ.get('CTXC_CLOUD_KEY', 'ofm-iVnqctXF-pb0Xf7jCUifSyjZtrrV9wtN')
 CLOUD_MODEL = os.environ.get('CTXC_CLOUD_MODEL', 'deepseek-official/deepseek-flash')
 
-def ollama_free(prompt):
-    """火花生成：先云端（1-2 秒），失败才本地量子不确定性（3 样本并发）。"""
+def ollama_free(prompt, temperature=None, max_tokens=80, timeout=20):
+    """火花生成：先云端（1-2 秒），失败才本地量子不确定性（2 样本并发）。
+    温度夹到供应商上限 [0, 2]（超了整批 400，2026-11-25 踩过）；timeout 按档位给。"""
+    if temperature is not None:
+        temperature = max(0.0, min(2.0, float(temperature)))
     try:
         cbody = {'model': CLOUD_MODEL, 'messages': [{'role': 'user', 'content': prompt}],
-                 'max_tokens': 80, 'stream': False, 'reasoning_effort': 'none'}
+                 'max_tokens': max_tokens, 'stream': False, 'reasoning_effort': 'none'}
+        if temperature is not None:
+            cbody['temperature'] = temperature
         creq = urllib.request.Request(CLOUD_API, data=json.dumps(cbody).encode(),
                                       headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CLOUD_KEY})
-        with urllib.request.urlopen(creq, timeout=20) as r:
+        with urllib.request.urlopen(creq, timeout=timeout) as r:
             out = (json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip()
             if out:
                 return out
@@ -277,7 +285,7 @@ def ollama_free(prompt):
             seed = int.from_bytes(os.urandom(4), 'big')
             body = {'model': BRAIN_MODEL,
                     'messages': [{'role': 'user', 'content': prompt}],
-                    'max_tokens': 48, 'temperature': 2.0, 'top_p': 0.99,
+                    'max_tokens': max(48, min(int(max_tokens), 96)), 'temperature': 2.0, 'top_p': 0.99,
                     'seed': seed, 'stream': False}
             req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(),
                                          headers={'Content-Type': 'application/json'})
@@ -298,18 +306,55 @@ BAD_IDEA = ('没有', '无关', '无法', '未知', '不清楚', '不相关', '�
             # meta 评论（模型评论指令而非给答案）
             '原则', '严格', '描述', '20个字', '20 字', '自由联想', '不妥', '不符', '不如下')
 
-def idea_ok(a, b, idea):
-    """灵感质量门：不自己连自己；不写「没关系/无法判断」这种废话。"""
+HESITANT = ('奇怪', '不相关', '可能有关', '可能是', '也许')  # 犹豫词：激烈模式起放过
+META_WORDS = ('原则', '严格', '描述', '20个字', '20 字', '自由联想', '不妥', '不符', '不如下')  # 恍惚起放过
+NARRATIVE_WORDS = ('神秘', '操控', '阴谋', '秘密', '暗中', '隐藏已久', '背后也许', '幕后')  # 反幻门：任何档都不放
+
+# ── 三档碰撞模式（维护者 2026-11-25 分档）─────────────────────────
+# 激烈：轻度疯狂——只为那一闪而逝的火花（多配对、高温、放过犹豫词，反幻门照拦）
+# 恍惚：中度疯狂——只为那条通往答案的路（二跳链：一句关联接到第三个节点，看它通向哪）
+# 疯狂：重度疯狂——为了一个答案（先大量发散，最后收敛：挑出最像同一个答案的两条）
+MODES = {
+    'intense': {'name': '激烈碰撞', 'temp': 1.6, 'pairs': 30, 'workers': 8, 'req_timeout': 15,
+                'max_tokens': 80, 'allow_hesitant': True, 'allow_meta': False,
+                'chain': 0, 'converge': False, 'prefix': '激烈碰撞-', 'budget': 120},
+    'trance':  {'name': '恍惚', 'temp': 1.9, 'pairs': 60, 'workers': 12, 'req_timeout': 12,
+                'max_tokens': 120, 'allow_hesitant': True, 'allow_meta': True,
+                'chain': 8, 'converge': False, 'prefix': '恍惚-', 'budget': 180},
+    # 2026-11-25 修：供应商温度上限是 [0,2]，2.2 会 400（100 组全空、59 组超时就是它）
+    'crazy':   {'name': '疯狂', 'temp': 2.0, 'pairs': 100, 'workers': 16, 'req_timeout': 10,
+                'max_tokens': 160, 'allow_hesitant': True, 'allow_meta': True,
+                'chain': 12, 'converge': True, 'prefix': '疯狂-', 'budget': 240},
+}
+
+def pick_mode(argv):
+    """CLI → 模式名：--crazy > --trance > --intense > None(常规)"""
+    for flag, mode in (('--crazy', 'crazy'), ('--trance', 'trance'), ('--intense', 'intense')):
+        if flag in argv:
+            return mode
+    return None
+
+def idea_ok(a, b, idea, mode=None):
+    """灵感质量门：不自己连自己；不写「没关系/无法判断」这种废话。
+    分档放宽：激烈放犹豫词；恍惚/疯狂连 meta 评论也放；叙事脑补（反幻门）任何档都不放。"""
     if not idea or len(str(idea).strip()) < 10:
         return False
     if a == b:
         return False
-    if any(w in str(idea) for w in BAD_IDEA):
+    cfg = MODES.get(mode) or {}
+    bad = list(BAD_IDEA)  # 先全拦；叙事词（反幻门）永远不从 bad 里移除
+    if cfg.get('allow_hesitant'):
+        bad = [w for w in bad if w not in HESITANT]
+    if cfg.get('allow_meta'):
+        bad = [w for w in bad if w not in META_WORDS]
+    # NARRATIVE_WORDS（叙事脑补=幻觉）不在任何 allow 名单里，所以始终留在 bad 中
+    if any(w in str(idea) for w in bad):
         return False
     return True
 
-def run_spark(cands, top_pairs, n_random=2):
-    report = {'通点广播': 0, '随机连接': 0}
+def run_spark(cands, top_pairs, mode=None, nodes_override=None):
+    cfg = MODES.get(mode) or {}
+    report = {'模式': cfg.get('name', '常规'), '通点广播': 0, '随机连接': 0}
     os.makedirs(SYN.rstrip('synapses.jsonl'), exist_ok=True)
     try:
         # 1. 通点广播：新共通点发给所有突触
@@ -326,6 +371,9 @@ def run_spark(cands, top_pairs, n_random=2):
                     break
         # 只取实体（白名单 from）；cands 的 to 是分词碎片，不能当突触节点
         nodes = list(dict.fromkeys(c['from'] for c in cands))
+        if nodes_override:
+            # 2026-11-25 修：激烈模式扩展节点池（全量实体），否则活跃白名单只有 3 个、配不出戏
+            nodes = list(dict.fromkeys(nodes + list(nodes_override)))
         with open(SPARK, 'a', encoding='utf-8') as f:
             for h, val in list(common.items())[:5]:
                 txt = str(val).strip()
@@ -350,18 +398,47 @@ def run_spark(cands, top_pairs, n_random=2):
                 report['神经发放'] = '%d 节点 · 路径: %s' % (j.get('发放', 0), j.get('路径', '')[:60])
         except Exception:
             pass
-        # 2. 悟：随机突触随机连接，本地模型自由联想
+        # 2. 悟：按档位配对（激烈=轻度疯狂 / 恍惚=中度 / 疯狂=重度）
+        n_pairs = cfg.get('pairs') or 2
         pairs = [(a, b) for i, a in enumerate(nodes) for b in nodes[i + 1:]]
         random.shuffle(pairs)
-        ins_file = os.path.join(os.path.dirname(SYN), '灵感-' + time.strftime('%Y-%m-%d') + '.md')
+        _pref = cfg.get('prefix', '灵感-')
+        ins_file = os.path.join(os.path.dirname(SYN), _pref + time.strftime('%Y-%m-%d') + '.md')
         lines = []
         blocked = 0
-        for a, b in pairs[:n_random]:
+        import concurrent.futures as _cf
+        _temp = cfg.get('temp')
+        _mt = cfg.get('max_tokens', 80)
+        _workers = cfg.get('workers', 8)
+        _rt = cfg.get('req_timeout', 15)
+        _budget = cfg.get('budget', 120)
+
+        def _one_pair(ab):
+            a, b = ab
             try:
-                idea = ollama_free('用一句话说出 %s 和 %s 的结构关联（共同机制/相似结构/因果关系），不超过20字。只给答案：不要评论这个问题，不要解释你的回答，不要用引号。' % (a, b))
+                idea = ollama_free('用一句话说出 %s 和 %s 的结构关联（共同机制/相似结构/因果关系），不超过20字。只给答案：不要评论这个问题，不要解释你的回答，不要用引号。' % (a, b), _temp, _mt, _rt)
             except Exception:
                 idea = ''
-            if idea and idea_ok(a, b, idea):
+            return a, b, idea
+
+        _sample = pairs[:n_pairs]
+        _results = []
+        _ex = _cf.ThreadPoolExecutor(max_workers=_workers)
+        try:
+            _futs = [_ex.submit(_one_pair, ab) for ab in _sample]
+            _done, _notdone = _cf.wait(_futs, timeout=_budget)
+            for _f in _done:
+                try:
+                    _results.append(_f.result())
+                except Exception:
+                    pass
+            if _notdone:
+                report['超时未完成'] = len(_notdone)
+        finally:
+            _ex.shutdown(wait=False, cancel_futures=True)
+
+        for a, b, idea in _results:
+            if idea and idea_ok(a, b, idea, mode):
                 lines.append('- %s ↔ %s → %s' % (a, b, idea))
                 # 火花不是突触：spark_random 只进灵感文件，不写 synapses（2026-11-25 修正）
                 with open(SPARK, 'a', encoding='utf-8') as f:
@@ -371,8 +448,43 @@ def run_spark(cands, top_pairs, n_random=2):
                 report['随机连接'] += 1
             elif idea:
                 blocked += 1
+
+        # 2.5 恍惚档：二跳链——把一句关联接到第三个节点，看这条路通向哪
+        if cfg.get('chain') and _results:
+            _pool3 = [str(x).strip() for x in nodes if str(x).strip() and str(x).strip() not in FRAGMENTS]
+            _chain = []
+            for _i, (a, b, idea) in enumerate([r for r in _results if r[2]][:cfg['chain']]):
+                if not _pool3:
+                    break
+                c = _pool3[(_i * 7 + 3) % len(_pool3)]
+                if c in (a, b):
+                    continue
+                _p = ('已知 %s 和 %s 的关系是：%s。现在把它接到 %s 上——这条链通向什么？'
+                      '（不超过40字，只给答案，不要解释）') % (a, b, str(idea).strip()[:40], c)
+                _t = ollama_free(_p, _temp, _mt, _rt)
+                if _t and len(_t.strip()) >= 8:
+                    _chain.append('- [链] %s → %s → %s：%s' % (a, b, c, _t.strip()))
+            if _chain:
+                lines.extend(_chain)
+                report['链'] = len(_chain)
+
+        # 2.6 疯狂档：收敛——从一堆碎片里挑出最像同一个答案的两条
+        _answer = ''
+        if cfg.get('converge') and lines:
+            _frag = '\n'.join(lines[-40:])[:3000]
+            _p = ('下面是碎片联想：\n%s\n\n挑出最像同一个答案的两条，并写出一句话的答案。'
+                  '输出格式：先说一句答案，再用 || 分隔，写出你挑的那两个名词（不超过40字，只给这一行）') % _frag
+            _answer = (ollama_free(_p, 1.2, 120) or '').strip()
+            report['收敛'] = (_answer[:80] or '无')
+
         with open(ins_file, 'w', encoding='utf-8') as f:
-            f.write('# 灵感火花（%s）\n\n' % time.strftime('%Y-%m-%d'))
+            _name = cfg.get('name')
+            if _name:
+                f.write('# %s（%s）\n\n> 档位：%s · 温度 %s · 配对 %d · 链 %s\n\n' % (
+                    _name, time.strftime('%Y-%m-%d'), _name, cfg.get('temp'), n_pairs, cfg.get('chain', 0)))
+                f.write('> 本档容忍灰：火花混在噪声里，挑是人的事——**不当事实用**。\n\n')
+            else:
+                f.write('# 灵感火花（%s）\n\n' % time.strftime('%Y-%m-%d'))
             if lines:
                 f.write('\n'.join(lines) + '\n')
             elif blocked:
@@ -380,6 +492,9 @@ def run_spark(cands, top_pairs, n_random=2):
                 report['质量门拦截'] = blocked
             else:
                 f.write('（本轮无火花：模型离线或无有效配对）\n')
+            if _answer:
+                f.write('\n## 收敛答案\n\n%s\n' % _answer)
+        report['火花文件'] = ins_file
     except Exception as ex:
         report['错误'] = str(ex)[:120]
     return report
