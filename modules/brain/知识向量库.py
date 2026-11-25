@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # 知识向量库.py — RAG 库段：把知识区条目向量化，存本地向量库（仅库与检索用，不替代突触）。
-import os, json, glob, re, hashlib, datetime, urllib.request
+import os, json, glob, re, hashlib, datetime, urllib.request, sys
 
 BRAIN = os.environ.get('BRAIN_ROOT', '/root/workspace/记忆档案')
 KNOW = os.path.join(BRAIN, '知识')
