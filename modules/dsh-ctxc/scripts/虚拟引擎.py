@@ -132,8 +132,10 @@ def switch():
         time.sleep(2)
         if any(ok for _, _, ok in probe()):
             log('切换成功，主引擎已恢复')
+            ensure_local_model()
             return True
     log('切换失败（60 秒未就绪）')
+    ensure_local_model()
     return False
 
 def find_main_pids():
@@ -180,7 +182,44 @@ def hot_restart():
         print('端口未释放，重启失败（未强杀）')
         return False
     log('端口已释放，拉起新引擎')
-    return switch()
+    ok = switch()
+    ensure_local_model()
+    return ok
+
+def probe_ollama():
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:11436/api/version', timeout=4) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+def ensure_local_model():
+    """热重启/切换后确保本地模型（ollama）活着——回切时它常被连带清掉"""
+    if probe_ollama():
+        return True
+    log('本地模型不在，拉起 ollama')
+    env = os.environ.copy()
+    env.update({
+        'OLLAMA_HOST': '127.0.0.1:11436',
+        'OLLAMA_MODELS': os.path.expanduser('~/.ollama/models'),
+        'OLLAMA_KEEP_ALIVE': '5m',
+        'OLLAMA_NUM_PARALLEL': '1',
+        'OLLAMA_MAX_LOADED_MODELS': '1',
+        'OLLAMA_CONTEXT_LENGTH': '4096',
+    })
+    try:
+        out = open('/tmp/ollama-serve.log', 'ab')
+        subprocess.Popen(['/opt/ollama/bin/ollama', 'serve'], env=env, stdout=out, stderr=out,
+                         start_new_session=True, close_fds=True)
+    except Exception as e:
+        log('ollama 启动失败: ' + str(e)[:100]); return False
+    for _ in range(15):
+        time.sleep(2)
+        if probe_ollama():
+            log('ollama 已拉起')
+            return True
+    log('ollama 拉起失败（30 秒未就绪）')
+    return False
 
 def once(dry=False):
     problems = preflight()
@@ -191,6 +230,7 @@ def once(dry=False):
     print('探测: ' + ', '.join('%s:%d%s' % (n, p, '✓' if ok else '✗') for n, p, ok in states))
     print('配置同步: ' + ('变化 %s' % ', '.join(changed) if changed else '无变化'))
     if alive:
+        ensure_local_model()
         print('结论: 主引擎在跑，虚拟引擎待命（只读）')
         return True
     if dry:
