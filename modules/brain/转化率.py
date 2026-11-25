@@ -10,10 +10,12 @@ import os, glob, json, subprocess, time
 ARCH = '/root/workspace/记忆档案'
 SESS = os.path.expanduser('~/.dsh/sessions')
 DAYS = 7
+META = {'我的总结.md', '采集与学习索引.md'}
 
 def knowledge_added():
     cutoff = time.time() - DAYS * 86400
-    return [f for f in glob.glob(ARCH + '/知识/*.md') if os.path.getmtime(f) >= cutoff]
+    return [f for f in glob.glob(ARCH + '/知识/*.md')
+            if os.path.getmtime(f) >= cutoff and os.path.basename(f) not in META]
 
 def remember_calls():
     """扫最近会话日志，统计 remember 调用次数"""

@@ -13,6 +13,8 @@ import os, json, sys, time, glob
 ARCH = '/root/workspace/记忆档案'
 KNOW = os.path.join(ARCH, '知识')
 STATE = os.path.join(KNOW, '.digested.json')
+# 元文件：不是知识条目（摘要是产物、索引是目录）
+META = {'我的总结.md', '采集与学习索引.md'}
 
 def load():
     try:
@@ -27,7 +29,8 @@ def save(d):
 
 def status():
     d = load()
-    week = [f for f in glob.glob(KNOW + '/*.md') if os.path.getmtime(f) >= time.time() - 7 * 86400]
+    week = [f for f in glob.glob(KNOW + '/*.md')
+            if os.path.getmtime(f) >= time.time() - 7 * 86400 and os.path.basename(f) not in META]
     pending = [f for f in week if os.path.basename(f) not in d]
     print(json.dumps({
         '本周新增': len(week),
