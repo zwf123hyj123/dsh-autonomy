@@ -10,6 +10,10 @@ import sys, os, json, subprocess, urllib.request, urllib.error
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import state_guard as sg
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location('判据', os.path.join(HERE, '判据.py'))
+_m = _ilu.module_from_spec(_spec); _spec.loader.exec_module(_m)
+J = _m
 
 DSH_HOME = os.path.expanduser(os.environ.get('DSH_HOME', '~/.dsh'))
 SETTINGS = os.path.join(DSH_HOME, 'our-free-model', 'settings.json')
@@ -41,28 +45,25 @@ def main():
     def add(name, ok, detail=''):
         rows.append((name, ok, detail))
 
-    # 1) 引擎
-    ok, code = probe(3080, '/')
-    add('引擎 3080', ok, 'HTTP %s' % code)
-    ok, code = probe(18326, '/v1/models', {'Authorization': 'Bearer ' + sg.GW_KEY})
-    add('网关 18326', ok, 'HTTP %s' % code)
+    # 1) 端口（判据表）
+    for name, port, path, need_auth in J.PORT_CHECKS:
+        headers = {'Authorization': 'Bearer ' + sg.GW_KEY} if need_auth else None
+        ok, code = probe(port, path, headers)
+        add(name, ok, 'HTTP %s' % code)
 
-    # 2) 本地模型
-    ok, code = probe(11436, '/api/version')
-    add('Ollama 11436', ok, 'HTTP %s' % code)
-
-    # 3) 配置（state_guard 内置三项）
-    for name, path, field, expect in sg.BUILTIN_CHECKS:
+    # 3) 配置（判据表）
+    for name, path, field, expect in J.CONFIG_CHECKS:
         ok, detail = sg.check_json_field(path, field, expect)
         add('配置·' + name, ok, detail if not ok else '')
 
     # 4) 网关模型真实出字
-    for model in ['our-free-model/glm-cn/glm-4-flash', 'chatanywhere/deepseek-chat', 'deepseek-official/deepseek-flash']:
+    for model in J.GATEWAY_MODELS:
         ok, detail = sg.check_gateway(model)
         add('模型·' + model.split('/')[-1], ok, detail if not ok else '')
 
-    # 5) 虚拟引擎
-    add('虚拟引擎常驻', proc_running('虚拟引擎.py --watch'), '')
+    # 5) 常驻进程（判据表）
+    for name, pattern in J.PROCESS_CHECKS:
+        add(name, proc_running(pattern), '')
 
     # 6) 输出
     bad = [r for r in rows if not r[1]]

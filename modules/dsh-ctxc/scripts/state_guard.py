@@ -23,7 +23,7 @@ import sys, os, json, shutil, hashlib, tempfile, subprocess, urllib.request, tim
 DSH_HOME = os.path.expanduser(os.environ.get('DSH_HOME', '~/.dsh'))
 SETTINGS = os.path.join(DSH_HOME, 'our-free-model', 'settings.json')
 GW = 'http://127.0.0.1:18326/v1/chat/completions'
-GW_KEY = 'ofm-iVnqctXF-pb0Xf7jCUifSyjZtrrV9wtN'
+GW_KEY = 'ofm-iVnqctXF-pb0Xf7jCUifSyjZtrrV9wtN'  # 判据.py 里有同名定义，这里保留兜底
 
 
 class GuardError(Exception):
@@ -112,12 +112,19 @@ def check_gateway(model, timeout=25):
         return False, str(e)[:120]
 
 
-BUILTIN_CHECKS = [
-    ('glm-cn 免费模型列表', SETTINGS, 'aggregate.providers.glm-cn.models',
-     ['glm-4-flash', 'glm-4.5-flash', 'glm-5.3-flash']),
-    ('siliconflow 已关闭', SETTINGS, 'aggregate.providers.siliconflow.enabled', False),
-    ('combo 首项为 glm-4-flash', SETTINGS, 'combos.0.models.0', 'glm-cn/glm-4-flash'),
-]
+# 判据唯一来源：scripts/判据.py（模拟大脑突触层——一个判据，多处引用）
+try:
+    import importlib.util as _ilu, os as _os
+    _spec = _ilu.spec_from_file_location('判据', _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '判据.py'))
+    _mod = _ilu.module_from_spec(_spec); _spec.loader.exec_module(_mod)
+    BUILTIN_CHECKS = _mod.CONFIG_CHECKS
+except Exception:
+    BUILTIN_CHECKS = [
+        ('glm-cn 免费模型列表', SETTINGS, 'aggregate.providers.glm-cn.models',
+         ['glm-4-flash', 'glm-4.5-flash', 'glm-5.3-flash']),
+        ('siliconflow 已关闭', SETTINGS, 'aggregate.providers.siliconflow.enabled', False),
+        ('combo 首项为 glm-4-flash', SETTINGS, 'combos.0.models.0', 'glm-cn/glm-4-flash'),
+    ]
 
 
 def cmd_check_config():
