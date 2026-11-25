@@ -58,17 +58,29 @@ def high_value(ks):
             n += 1
     return n
 
+def with_summary(ks):
+    """有自己总结的知识（真正的「转化」）"""
+    try:
+        import json
+        d = json.load(open('/root/workspace/记忆档案/知识/.digested.json'))
+    except Exception:
+        d = {}
+    return sum(1 for f in ks if d.get(os.path.basename(f), {}).get('summary'))
+
 def main():
     ks = knowledge_added()
     hv = high_value(ks)
     rm = remember_calls()
+    ws = with_summary(ks)
     rate_all = (rm / len(ks) * 100) if ks else 0
     rate_hv = (rm / hv * 100) if hv else 0
     print(json.dumps({
         '本周新增知识': len(ks),
         '高分候选': hv,
         '本周 remember': rm,
+        '有自己总结': ws,
         '转化率(全部知识)': '%.0f%%' % rate_all,
+        '转化率(按总结算)': '%.0f%%' % (ws / len(ks) * 100 if ks else 0),
         '转化率(高分候选)': '%.0f%%' % rate_hv,
         '目标': '60%',
         '判据': '按高分候选算更合理——分母只算「值得记的」，避免逼着记垃圾',
