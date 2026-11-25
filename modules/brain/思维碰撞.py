@@ -79,12 +79,26 @@ def load_whitelist():
     return names
 
 def scan_files():
-    META = ('采集与学习索引', '我的总结', '采集约定', '分区')
+    META = ('采集与学习索引', '采集约定', '分区')  # 2026-11-25 修：我的总结 重新纳入碰撞（引路人：自己总结的才好撞）
     files = []
     # 会话卡不再参与共现（含系统提示词噪音）；只扫知识层与项目文档
     for pat in [KNOW + '/*.md', ARCHIVE + '/项目/*/*/*.md', ARCHIVE + '/连续性/未归档/*.md']:
         files += [f for f in glob.glob(pat) if not any(m in os.path.basename(f) for m in META)]
     return files
+
+def entity_like(e):
+    """实体判定：排除 hash / URL 后缀 / 常见脏词（cooccur 写入与词典共用）。"""
+    if not e or len(e) < 3:
+        return False
+    if str(e).startswith('---'):
+        return False
+    if re.fullmatch(r'[0-9a-f]{8,}', str(e)):
+        return False
+    if re.search(r'\.(html|php|shtml|htm|jsp)$', str(e), re.I):
+        return False
+    if str(e).lower() in {'http', 'https', 'www', 'com', 'cn', 'org', 'net', 'news', 'html', 'shtml'}:
+        return False
+    return True
 
 def build_entities():
     """实体词典：硬编码常见名 + 从知识动态提取专名（dsh-xxx / 大写英文名）。
@@ -116,19 +130,7 @@ def build_entities():
             'THE', 'AND', 'THIS', 'THAT', 'WITH', 'FOR', 'FROM', 'NOT', 'YOU', 'ALL', 'CAN', 'ARE', 'WAS', 'HAS', 'BUT', 'OUR', 'OUT', 'ONE', 'TWO',
             'http', 'https', 'shtml', 'html', 'www', 'com', 'org',
             'root', 'workspace', 'auto', 'home', 'tmp', 'usr', 'kepu', 'lives', 'news', 'shtml'}
-    def _entity_like(e):
-        if not e or len(e) < 3:
-            return False
-        if e.startswith('---'):
-            return False
-        if re.fullmatch(r'[0-9a-f]{8,}', e):      # 纯 hash
-            return False
-        if re.search(r'\.(html|php|shtml|htm|jsp)$', e, re.I):  # URL 后缀
-            return False
-        if e.lower() in {'http', 'https', 'www', 'com', 'cn', 'org', 'net', 'news', 'html', 'shtml'}:
-            return False
-        return True
-    return {e for e in ents if e not in STOP and _entity_like(e)}
+    return {e for e in ents if e not in STOP and entity_like(e)}
 
 def keywords(text, entities=None):
     """只提实体：词典里的专名 + 英文标识符。不再做中文 2-4 字通配（那是碎片之源）。"""
@@ -206,7 +208,7 @@ def main():
                        'from': c['from'], 'to': c['to'], 'rel': 'cooccur',
                        'text': '共现 %d 次 | 来源：%s' % (c['count'], os.path.basename(c['source'])),
                        'count': c['count']}
-                if is_quality(rec) and c['to'] not in FRAGMENTS and (c['to'] in {'酒架', '突触', '海马体', '调酒器'} or len(str(c['to'])) >= 3):
+                if is_quality(rec) and entity_like(c['to']) and entity_like(c['from']) and c['to'] not in FRAGMENTS:
                     f.write(json.dumps(rec, ensure_ascii=False) + '\n')
     except Exception:
         pass
