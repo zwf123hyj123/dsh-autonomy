@@ -99,7 +99,47 @@ def clean_reflection(text):
     t = re.sub(r'（这个[^）]*）', '', t)
     return t.strip()
 
+LOCK = os.path.join(BRAIN, '连续性', '.wake.lock')
+
+def acquire_lock(max_age=420):
+    """单实例锁：已有实例在跑（锁未过期）就跳过，避免 ollama 慢时进程堆积。"""
+    try:
+        if os.path.exists(LOCK):
+            import time as _t
+            age = _t.time() - os.path.getmtime(LOCK)
+            # 检查锁里的 PID 是否还活着：死了就夺锁，别让残留锁挡住
+            try:
+                pid = int(open(LOCK).read().strip() or 0)
+            except Exception:
+                pid = 0
+            alive = pid > 0 and os.path.exists('/proc/%d' % pid)
+            if alive and age < max_age:
+                print(json.dumps({'跳过': '另一个自我唤醒在跑（pid %d，已 %.0f 秒）' % (pid, age)}, ensure_ascii=False))
+                return False
+    except Exception:
+        pass
+    try:
+        open(LOCK, 'w').write(str(os.getpid()))
+    except Exception:
+        pass
+    return True
+
+def release_lock():
+    try:
+        os.remove(LOCK)
+    except Exception:
+        pass
+
 def main():
+    if not acquire_lock():
+        return
+    try:
+        _main_body()
+    finally:
+        release_lock()
+
+
+def _main_body():
     mood = decay_mood(load_mood())
     core = read(CORE, 2200)  # 速读版全文；11-22 实测：注入 4.2k 全文会让 1.5B 在 240s 内出不来字
     comp = read(COMP, 1400)
@@ -130,7 +170,7 @@ def main():
     req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(),
                                  headers={'Content-Type': 'application/json'})
     try:
-        with urllib.request.urlopen(req, timeout=600) as r:
+        with urllib.request.urlopen(req, timeout=180) as r:
             out = clean_reflection((json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip())
     except Exception as e:
         print(json.dumps({'自省': 0, '错误': str(e)[:120]}, ensure_ascii=False))
@@ -167,7 +207,7 @@ def main():
         try:
             req2 = urllib.request.Request(OLLAMA, data=json.dumps(body2).encode(),
                                           headers={'Content-Type': 'application/json'})
-            with urllib.request.urlopen(req2, timeout=600) as r2:
+            with urllib.request.urlopen(req2, timeout=180) as r2:
                 out2 = clean_reflection((json.loads(r2.read().decode())['choices'][0]['message'].get('content') or '').strip())
             if quality_ok(out2):
                 out = out2
