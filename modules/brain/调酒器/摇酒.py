@@ -8,8 +8,23 @@ OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completion
 BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
 INJECT = '/root/workspace/记忆档案/本地模型注入.py'
 
+CLOUD_API = os.environ.get('CTXC_CLOUD_API', 'http://127.0.0.1:18326/v1/chat/completions')
+CLOUD_KEY = os.environ.get('CTXC_CLOUD_KEY', 'ofm-iVnqctXF-pb0Xf7jCUifSyjZtrrV9wtN')
+CLOUD_MODEL = os.environ.get('CTXC_CLOUD_MODEL', 'deepseek-official/deepseek-flash')
+
 def ollama(prompt, max_tokens=120, temperature=0.8):
-    """本地模型调用：带学习笔记注入；思维链不确定性（默认高温，接受发散）。"""
+    """文案生成：先云端（5-10s 质量好），失败再本地兜底（带学习笔记注入）。"""
+    try:
+        cbody = {'model': CLOUD_MODEL, 'messages': [{'role': 'user', 'content': prompt}],
+                 'max_tokens': max_tokens, 'temperature': min(temperature, 1.0), 'stream': False}
+        creq = urllib.request.Request(CLOUD_API, data=json.dumps(cbody).encode(),
+                                      headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CLOUD_KEY})
+        with urllib.request.urlopen(creq, timeout=30) as r:
+            out = (json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip()
+            if out:
+                return out
+    except Exception:
+        pass
     head = ''
     if os.path.exists(INJECT):
         head = subprocess.run(['python3', INJECT], capture_output=True, text=True, timeout=30).stdout
@@ -114,7 +129,10 @@ def main():
             for t in ts:
                 t.join()
             draft = random.choice(_samples) if _samples else ''
-            print('[本地模型·文案初稿] ' + draft, file=sys.stderr)
+            if draft:
+                print('[本地模型·文案初稿] ' + draft, file=sys.stderr)
+            else:
+                print('[文案未生成：本地模型样本为空]', file=sys.stderr)
         except Exception as e:
             print('[本地模型调用失败，回退关键词法] %s' % e, file=sys.stderr)
 

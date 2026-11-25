@@ -21,7 +21,7 @@ def main():
     if os.path.exists(OUT):
         print('今天已经调过：' + os.path.basename(OUT))
         return
-    # 先出规则配方（快，毫秒级）；本地模型文案太慢，默认不调
+    # 规则配方（快，毫秒级）；文案不走摇酒.py 的慢分支，由这里单独用云端生成
     r = subprocess.run(['python3', SHAKE, idea],
                        capture_output=True, text=True, timeout=60)
     out = (r.stdout or '').strip()
