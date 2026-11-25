@@ -239,7 +239,8 @@ def _main_body():
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
     with open(LOG, 'a', encoding='utf-8') as f:
         f.write('## %s\n\n%s\n\n' % (datetime.datetime.now().strftime('%Y-%m-%d %H:%M'), out))
-    log_idx('成功：%s' % out[:40].replace('\n', ' '))
+    if '未过质量门' not in out:
+        log_idx('成功：%s' % out[:40].replace('\n', ' '))
     # 情感态更新：自省带出的情绪留下、慢慢消散（像真的心情）
     nm = classify_mood(out)
     if nm:
