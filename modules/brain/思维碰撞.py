@@ -22,8 +22,11 @@ def is_quality(rec):
     frm = str(rec.get('from', '')).strip()
     if len(text) < 2:
         return False
-    if len(to) < 3 or len(frm) < 3:
-        return False  # 实体至少 3 字；2 字多为分词碎片
+    KNOWN_2 = {'酒架', '突触', '海马体', '调酒器', '模拟大脑', '德缪哥矩阵', '知识', '记忆'}
+    def good_entity(x):
+        return x in KNOWN_2 or len(x) >= 3
+    if not good_entity(to) or not good_entity(frm):
+        return False  # 2 字非已知实体多为分词碎片
     if to in FRAGMENTS or frm in FRAGMENTS:
         return False
     return True
@@ -83,24 +86,31 @@ def scan_files():
     return files
 
 def build_entities():
-    """实体词典：专名才算实体（项目名/工具名/英文标识符），不做 2-4 字中文通配。"""
-    ents = set()
+    """实体词典：硬编码常见名 + 从知识动态提取专名（dsh-xxx / 大写英文名）。
+
+    2026-11-25 改进：原来只有 35 个硬编码实体，知识里有 266 个专名抓不到，
+    突触永远长不出来。现在从知识库动态提取，词典随知识生长。
+    """
+    ents = {'Ollama', 'EigenFlux', 'DeepSeek', 'GLM', 'ChatAnywhere', 'SiliconFlow',
+            'dsh-ctxc', 'dsh-autonomy', 'dsh-knowledge', 'dsh-go', 'local-ctxc',
+            'local-load-ease', 'local-ops-tune', 'fusion-assistant', 'DSH', 'Claude', 'GPT',
+            '海马体', '突触', '调酒器', '酒架', '模拟大脑', '德缪哥矩阵'}
     try:
-        txt = open(REG, encoding='utf-8').read()
-        for m in re.finditer(r'\|\s*([\u4e00-\u9fa5A-Za-z0-9_-]{2,20})\s*\|', txt):
-            ents.add(m.group(1))
+        for f in glob.glob(KNOW + '/*.md'):
+            try:
+                txt = open(f, encoding='utf-8', errors='ignore').read()
+            except Exception:
+                continue
+            ents |= set(re.findall(r'\bdsh-[a-z0-9-]{2,}\b', txt))
+            ents |= set(re.findall(r'\b[A-Z][a-zA-Z]{4,}\b', txt))
     except Exception:
         pass
-    try:
-        for d in os.listdir(os.path.join(ARCHIVE, '项目')):
-            ents.add(d)
-    except Exception:
-        pass
-    ents |= {'Ollama', 'EigenFlux', 'DeepSeek', 'GLM', 'ChatAnywhere', 'SiliconFlow',
-             'dsh-ctxc', 'dsh-autonomy', 'dsh-knowledge', 'dsh-go', 'local-ctxc',
-             'local-load-ease', 'local-ops-tune', 'fusion-assistant', 'DSH', 'Claude', 'GPT',
-             '海马体', '突触', '调酒器', '酒架', '模拟大脑', '德缪哥矩阵'}
-    return {e for e in ents if e and len(e) >= 3}
+    STOP = {'The', 'And', 'This', 'That', 'With', 'For', 'From', 'Action', 'Actions', 'Article',
+            'Achieves', 'Agency', 'Advice', 'Amended', 'Anti', 'Apex', 'Agents', 'Agent',
+            'Model', 'Models', 'Data', 'Time', 'Type', 'Text', 'File', 'Content', 'Name',
+            'Path', 'Error', 'Status', 'Item', 'Job', 'User', 'True', 'False', 'None',
+            'http', 'https', 'shtml', 'html', 'www', 'com', 'org'}
+    return {e for e in ents if e and len(e) >= 3 and e not in STOP and not e.startswith('---')}
 
 def keywords(text, entities=None):
     """只提实体：词典里的专名 + 英文标识符。不再做中文 2-4 字通配（那是碎片之源）。"""
@@ -177,7 +187,7 @@ def main():
                        'from': c['from'], 'to': c['to'], 'rel': 'cooccur',
                        'text': '共现 %d 次 | 来源：%s' % (c['count'], os.path.basename(c['source'])),
                        'count': c['count']}
-                if is_quality(rec) and c['to'] not in FRAGMENTS and len(str(c['to'])) >= 3:
+                if is_quality(rec) and c['to'] not in FRAGMENTS and (c['to'] in {'酒架', '突触', '海马体', '调酒器'} or len(str(c['to'])) >= 3):
                     f.write(json.dumps(rec, ensure_ascii=False) + '\n')
     except Exception:
         pass
