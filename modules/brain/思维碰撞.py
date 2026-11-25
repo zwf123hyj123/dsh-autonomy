@@ -110,7 +110,19 @@ def build_entities():
             'Model', 'Models', 'Data', 'Time', 'Type', 'Text', 'File', 'Content', 'Name',
             'Path', 'Error', 'Status', 'Item', 'Job', 'User', 'True', 'False', 'None',
             'http', 'https', 'shtml', 'html', 'www', 'com', 'org'}
-    return {e for e in ents if e and len(e) >= 3 and e not in STOP and not e.startswith('---')}
+    def _entity_like(e):
+        if not e or len(e) < 3:
+            return False
+        if e.startswith('---'):
+            return False
+        if re.fullmatch(r'[0-9a-f]{8,}', e):      # 纯 hash
+            return False
+        if re.search(r'\.(html|php|shtml|htm|jsp)$', e, re.I):  # URL 后缀
+            return False
+        if e.lower() in {'http', 'https', 'www', 'com', 'cn', 'org', 'net', 'news', 'html', 'shtml'}:
+            return False
+        return True
+    return {e for e in ents if e not in STOP and _entity_like(e)}
 
 def keywords(text, entities=None):
     """只提实体：词典里的专名 + 英文标识符。不再做中文 2-4 字通配（那是碎片之源）。"""
