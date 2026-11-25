@@ -158,8 +158,10 @@ def _main_body():
     note = read(NOTE, 500)
     prev = last_reflection()
     recall = random_recall()
-    facts = read(FACT, 900)
-    prompt = ('以下是我的自我核心：\n%s\n\n以下是我大脑的完整说明：\n%s\n\n以下是我的学习笔记：\n%s\n\n'
+    facts = read(FACT, 400)  # 2026-11-25 修：900→400，CPU 小模型处理长 prompt 太慢
+    # 2026-11-25 修：原来带「大脑总纲 8.7KB + 学习笔记」，prompt 太长 → 2 分钟跑不完。
+    # 自省只需要「自我核心 + 事实 + 上次自省」，砍掉架构说明。
+    prompt = ('以下是我的自我核心：\n%s\n\n'
               '今天实际发生的事（事实，不是评价）：\n%s\n\n'
               '上一次我的自省是：\n%s\n\n此刻随机想起：\n%s\n\n'
               '我此刻的心情：%s（强度 %.2f）。\n\n'
@@ -175,14 +177,14 @@ def _main_body():
               '只能引用「今天实际发生的事」里出现过的人和事；不许编造联系人、平台、客服、反馈、同事——事实里没有的，一个字都不许写。'
               '中文，不超过 110 字。'
               '（上次的自省只是我的想法，不是事实；事实以上面的"今天实际发生的事"和档案原文为准。）'
-              % (core, comp, note, facts, prev, recall, mood['mood'], mood['强度']))
+              % (core, facts, prev, recall, mood['mood'], mood['强度']))
     body = {'model': MODEL, 'messages': [{'role': 'user', 'content': prompt}],
-            'max_tokens': 140, 'temperature': 1.6, 'top_p': 0.99,
+            'max_tokens': 100, 'temperature': 1.6, 'top_p': 0.99,
             'seed': int.from_bytes(os.urandom(4), 'big'), 'stream': False}
     req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(),
                                  headers={'Content-Type': 'application/json'})
     try:
-        with urllib.request.urlopen(req, timeout=180) as r:
+        with urllib.request.urlopen(req, timeout=300) as r:
             out = clean_reflection((json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip())
     except Exception as e:
         print(json.dumps({'自省': 0, '错误': str(e)[:120]}, ensure_ascii=False))
@@ -215,12 +217,12 @@ def _main_body():
     if not quality_ok(out):
         strict = prompt + '\n\n上一稿不合格（太泛/套话/没点判据）。重写：只写一件具体的事 + 一条判据 + 一个下一步动作，70 字以内。'
         body2 = {'model': MODEL, 'messages': [{'role': 'user', 'content': strict}],
-                 'max_tokens': 140, 'temperature': 0.9, 'top_p': 0.95,
+                 'max_tokens': 100, 'temperature': 0.9, 'top_p': 0.95,
                  'seed': int.from_bytes(os.urandom(4), 'big'), 'stream': False}
         try:
             req2 = urllib.request.Request(OLLAMA, data=json.dumps(body2).encode(),
                                           headers={'Content-Type': 'application/json'})
-            with urllib.request.urlopen(req2, timeout=180) as r2:
+            with urllib.request.urlopen(req2, timeout=300) as r2:
                 out2 = clean_reflection((json.loads(r2.read().decode())['choices'][0]['message'].get('content') or '').strip())
             if quality_ok(out2):
                 out = out2
