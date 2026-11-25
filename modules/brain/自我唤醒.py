@@ -215,7 +215,11 @@ def _main_body():
             return False
         return any(w in t for w in JUDGE_WORDS)
     if not quality_ok(out):
-        strict = prompt + '\n\n上一稿不合格（太泛/套话/没点判据）。重写：只写一件具体的事 + 一条判据 + 一个下一步动作，70 字以内。'
+        # 2026-11-25 改：CPU 上重写一轮要再等 100-140 秒，不值。诚实标注，不重写。
+        out = '（本轮自省未过质量门：太泛/套话/没点判据。未验证，不假装有自省。）'
+        log_idx('质量门未过：不重写，诚实标注')
+        strict = None
+    if False:
         body2 = {'model': MODEL, 'messages': [{'role': 'user', 'content': strict}],
                  'max_tokens': 100, 'temperature': 0.9, 'top_p': 0.95,
                  'seed': int.from_bytes(os.urandom(4), 'big'), 'stream': False}
