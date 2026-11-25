@@ -113,6 +113,13 @@ def check_consistency():
         issues.append('索引缺失')
     return _ok(not issues, '读写一致', '；'.join(issues))
 
+# 可自动修复的层 → 对应命令（修不了的层留给人判断）
+FIXERS = {
+    '知识层': ['python3', os.path.join(ARCH, '批量消化.py'), '--apply'],
+    '记忆层': ['python3', os.path.join(ARCH, '会话卡体检.py'), '--apply'],
+    '跨层一致': ['python3', os.path.join(ARCH, '建索引.py')],
+}
+
 CHECKS = [
     ('记忆层', check_memory), ('知识层', check_knowledge), ('突触层', check_synapse),
     ('工具层', check_tools), ('思维碰撞', check_collision), ('情感层', check_emotion),
@@ -120,21 +127,31 @@ CHECKS = [
 ]
 
 def main():
-    if '--serve' in sys.argv:
-        pass
+    fix = '--fix' in sys.argv
     rows = []
     for name, fn in CHECKS:
         try:
             ok, detail = fn()
         except Exception as e:
             ok, detail = False, '检查异常：' + str(e)[:60]
+        # 2026-11-25 加 --fix：有修复命令的层，自动修一次再复检
+        if not ok and fix and name in FIXERS:
+            try:
+                subprocess.run(FIXERS[name], capture_output=True, text=True, timeout=180)
+                ok2, detail2 = fn()
+                if ok2:
+                    ok, detail = True, detail + ' → 已自动修复'
+                else:
+                    detail = detail + '（自动修复后仍有问题）'
+            except Exception as e:
+                detail = detail + '（自动修复失败：%s）' % str(e)[:40]
         rows.append((name, ok, detail))
     bad = [r for r in rows if not r[1]]
-    print('# 八层自检')
+    print('# 八层自检' + ('（--fix）' if fix else ''))
     for name, ok, detail in rows:
         print(('✓ ' if ok else '✗ ') + name + '：' + detail)
     print('')
-    print('结论：' + ('全部正常' if not bad else '%d 层有缺口' % len(bad)))
+    print('结论：' + ('全部正常' if not bad else '%d 层有缺口（需人工）' % len(bad)))
     sys.exit(0 if not bad else 1)
 
 if __name__ == '__main__':
