@@ -4,7 +4,7 @@
 
 只收有效的（非「未取到」），一周一条；没有有效条目就写「本周无有效感知」——空跑也要留痕。
 """
-import os, re, time, datetime
+import os, re, datetime
 
 ARCH = '/root/workspace/记忆档案'
 LOG = os.path.join(ARCH, '感知', '感知日志.md')
@@ -25,7 +25,23 @@ def main():
     today = datetime.date.today()
     out = os.path.join(OUT_DIR, '感知-%s.md' % today.strftime('%Y-%m-%d'))
     if os.path.exists(out):
-        print('本周已归档：' + os.path.basename(out)); return
+        # 2026-11-25 修：增量归档（原来文件存在就跳过，当天 12:00 后的新感知永远进不来）
+        existing = set()
+        try:
+            for line in open(out, encoding='utf-8'):
+                m = re.match(r'- (\d{4}-\d{2}-\d{2} \d{2}:\d{2})', line)
+                if m:
+                    existing.add(m.group(1))
+        except Exception:
+            pass
+        new_rows = [r for r in rows if r[0] not in existing]
+        if not new_rows:
+            print('本周已归档（无新增）'); return
+        with open(out, 'a', encoding='utf-8') as f:
+            for t, app, note in new_rows[-50:]:
+                f.write('- %s | %s | %s\n' % (t, app, note))
+        print('增量归档 %d 条 → %s' % (len(new_rows), os.path.basename(out)))
+        return
     with open(out, 'w', encoding='utf-8') as f:
         f.write('# 感知归档（%s）\n\n' % today)
         f.write('> 只收有效感知条目（非「未取到」），来源：感知/感知日志.md\n\n')

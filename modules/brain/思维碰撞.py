@@ -15,6 +15,9 @@ FRAGMENTS = {'每轮对话', '后自动滚', '原文已归', '压缩失败', '�
              '后自动追', '收件箱每', '收件箱会', '阶段一', '不改旧行', '只记要点', '与出处', '继续任务',
              '需求', '子代理', 'dev', 'tmp', 'job', 'item', '未知', '可能', '没有', '什么'}
 
+# 2 字已知实体：这些是确认的实体，不是分词碎片（is_quality 与 entity_like 共用，读写一致）
+KNOWN_2 = {'酒架', '突触', '海马体', '调酒器', '模拟大脑', '德缪哥矩阵', '知识', '记忆'}
+
 def is_quality(rec):
     """质量门：text >= 2 字符、from/to >= 2 字符、to 不是碎片词"""
     text = str(rec.get('text', '')).strip()
@@ -22,7 +25,6 @@ def is_quality(rec):
     frm = str(rec.get('from', '')).strip()
     if len(text) < 2:
         return False
-    KNOWN_2 = {'酒架', '突触', '海马体', '调酒器', '模拟大脑', '德缪哥矩阵', '知识', '记忆'}
     def good_entity(x):
         return x in KNOWN_2 or len(x) >= 3
     if not good_entity(to) or not good_entity(frm):
@@ -79,16 +81,24 @@ def load_whitelist():
     return names
 
 def scan_files():
-    META = ('采集与学习索引', '采集约定', '分区')  # 2026-11-25 修：我的总结 重新纳入碰撞（引路人：自己总结的才好撞）
+    # 会话卡/接续卡/清单/自动归档类文件含系统提示词与流水账，不参与共现
+    META = ('采集与学习索引', '采集约定', '分区', '官方源日志', '巡查日志', '自治日志',
+            '_一链导入', '连续性卡', '勘误', '任务清单',
+            'EigenFlux-动态', 'QQ-对话记录', '感知-2026', '网络可达性', '判据体检报告')  # 2026-11-25 修：我的总结 重新纳入碰撞；日志/会话卡文件不是知识（判断 86）
     files = []
     # 会话卡不再参与共现（含系统提示词噪音）；只扫知识层与项目文档
-    for pat in [KNOW + '/*.md', ARCHIVE + '/项目/*/*/*.md', ARCHIVE + '/连续性/未归档/*.md']:
+    # 2026-11-25 修：补 项目/*.md（项目根目录一级文件：判断库副本/人工意识/通读报告）与 项目/*/*.md（README/CHANGELOG/计划）
+    for pat in [KNOW + '/*.md', ARCHIVE + '/项目/*.md', ARCHIVE + '/项目/*/*.md', ARCHIVE + '/项目/*/*/*.md', ARCHIVE + '/连续性/未归档/*.md']:
         files += [f for f in glob.glob(pat) if not any(m in os.path.basename(f) for m in META)]
     return files
 
 def entity_like(e):
     """实体判定：排除 hash / URL 后缀 / 常见脏词（cooccur 写入与词典共用）。"""
-    if not e or len(e) < 3:
+    if not e:
+        return False
+    if e in KNOWN_2:
+        return True  # 2 字已知实体不是碎片
+    if len(e) < 3:
         return False
     if str(e).startswith('---'):
         return False
@@ -144,8 +154,17 @@ def keywords(text, entities=None):
             'path', 'type', 'text', 'file', 'content', 'name', 'data', 'time', 'item', 'job', 'user',
             'python3', 'python', 'node', 'scheduled', 'background', 'null', 'none', 'error', 'status',
             'auto', 'root', 'workspace', 'kepu', 'lives', 'news', 'shtml', 'xljk', 'home', 'tmp', 'usr',
-            'This', 'this', 'message', 'REMINDER', 'SCHEDULE', 'reminder'}
-    return {w for w in ws if w not in stop and len(w) >= 3}
+            'This', 'this', 'message', 'REMINDER', 'SCHEDULE', 'reminder',
+            # 2026-11-25 补：通用技术词/配置名不是实体（判断 86：扩展抓取必须同步扩展过滤）
+            'JSON', 'API', 'token', 'scripts', 'CHUNK', 'request', 'response', 'config', 'default',
+            'value', 'values', 'args', 'argv', 'stdin', 'stdout', 'stderr', 'exec', 'shell', 'code',
+            'version', 'plugin', 'install', 'update', 'check', 'start', 'stop', 'run', 'test', 'debug',
+            'log', 'logs', 'info', 'warn', 'failed', 'before', 'after', 'changed', 'were', 'current',
+            'next', 'line', 'read', 'tool', 'call', 'calls', 'b-instruct'}
+    def is_const(w):
+        # 配置常量（MAX_LOCAL/Q4_K_M 这类）：全大写+下划线/数字，不是语义实体
+        return bool(re.fullmatch(r'[A-Z0-9_]{2,}', w)) and ('_' in w or any(c.isdigit() for c in w))
+    return {w for w in ws if w not in stop and len(w) >= 3 and not is_const(w)}
 
 def main():
     whitelist = load_whitelist()
@@ -229,7 +248,7 @@ def main():
     }, ensure_ascii=False, indent=1))
 
 # ── 火花：一个通点发给所有突触（模拟自我）+ 随机突触随机连接（一通百通）──
-import random, subprocess, datetime, urllib.request
+import random, subprocess, urllib.request
 
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completions')
 BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
@@ -242,7 +261,7 @@ def ollama_free(prompt):
     """火花生成：先云端（1-2 秒），失败才本地量子不确定性（3 样本并发）。"""
     try:
         cbody = {'model': CLOUD_MODEL, 'messages': [{'role': 'user', 'content': prompt}],
-                 'max_tokens': 80, 'stream': False}
+                 'max_tokens': 80, 'stream': False, 'reasoning_effort': 'none'}
         creq = urllib.request.Request(CLOUD_API, data=json.dumps(cbody).encode(),
                                       headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CLOUD_KEY})
         with urllib.request.urlopen(creq, timeout=20) as r:
@@ -273,7 +292,11 @@ def ollama_free(prompt):
         t.join()
     return random.choice(samples) if samples else ''
 
-BAD_IDEA = ('没有', '无关', '无法', '未知', '不清楚', '不相关', '奇怪', '不存在', '可能有关', '可能是')
+BAD_IDEA = ('没有', '无关', '无法', '未知', '不清楚', '不相关', '奇怪', '不存在', '可能有关', '可能是',
+            # 2026-11-25 补：脑补叙事也是幻觉（反幻门）——灵感要结构关联，不要编故事
+            '神秘', '操控', '阴谋', '秘密', '暗中', '隐藏已久', '背后也许', '幕后',
+            # meta 评论（模型评论指令而非给答案）
+            '原则', '严格', '描述', '20个字', '20 字', '自由联想', '不妥', '不符', '不如下')
 
 def idea_ok(a, b, idea):
     """灵感质量门：不自己连自己；不写「没关系/无法判断」这种废话。"""
@@ -332,9 +355,10 @@ def run_spark(cands, top_pairs, n_random=2):
         random.shuffle(pairs)
         ins_file = os.path.join(os.path.dirname(SYN), '灵感-' + time.strftime('%Y-%m-%d') + '.md')
         lines = []
+        blocked = 0
         for a, b in pairs[:n_random]:
             try:
-                idea = ollama_free('自由联想，不要解释，只说一句 20 字以内的话：' + a + ' 与 ' + b + ' 之间可能有什么联系？')
+                idea = ollama_free('用一句话说出 %s 和 %s 的结构关联（共同机制/相似结构/因果关系），不超过20字。只给答案：不要评论这个问题，不要解释你的回答，不要用引号。' % (a, b))
             except Exception:
                 idea = ''
             if idea and idea_ok(a, b, idea):
@@ -345,9 +369,17 @@ def run_spark(cands, top_pairs, n_random=2):
                                         'from': a, 'to': b, 'rel': 'spark_random',
                                         'text': idea}, ensure_ascii=False) + '\n')
                 report['随机连接'] += 1
+            elif idea:
+                blocked += 1
         with open(ins_file, 'w', encoding='utf-8') as f:
             f.write('# 灵感火花（%s）\n\n' % time.strftime('%Y-%m-%d'))
-            f.write('\n'.join(lines) + '\n' if lines else '（本轮无火花：模型离线或无有效配对）\n')
+            if lines:
+                f.write('\n'.join(lines) + '\n')
+            elif blocked:
+                f.write('（本轮 %d 条候选均未过质量门：模型在线，灵感暂缺。）\n' % blocked)
+                report['质量门拦截'] = blocked
+            else:
+                f.write('（本轮无火花：模型离线或无有效配对）\n')
     except Exception as ex:
         report['错误'] = str(ex)[:120]
     return report
