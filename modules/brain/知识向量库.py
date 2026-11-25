@@ -8,7 +8,7 @@ KNOW = os.path.join(BRAIN, '知识')
 RAG = os.path.join(KNOW, '.rag')
 VEC = os.path.join(RAG, 'vectors.json')
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436')
-EMB = os.environ.get('EMB_MODEL', 'nomic-embed-text')
+EMB = os.environ.get('EMB_MODEL', 'nomic-embed-text:latest')  # 2026-11-25 修：缺 :latest 会 400 卡 30 秒
 
 def embed(texts):
     body = json.dumps({'model': EMB, 'input': texts}).encode()
