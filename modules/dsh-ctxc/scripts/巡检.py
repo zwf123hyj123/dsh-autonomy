@@ -65,6 +65,21 @@ def main():
     for name, pattern in J.PROCESS_CHECKS:
         add(name, proc_running(pattern), '')
 
+    # 5.5) 浏览器与 keepalive（闲鱼值守依赖；keepalive 死了自动拉起）
+    ok, code = probe(9333, '/json/version')
+    add('CDP 9333', ok, 'HTTP %s' % code)
+    keep = proc_running('keepalive.sh')
+    if not keep:
+        try:
+            subprocess.Popen(['setsid', 'sh', '/root/workspace/tools/browser/daemon/keepalive.sh'],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True, close_fds=True)
+            add('keepalive', False, '刚发现缺失，已尝试拉起')
+        except Exception as e:
+            add('keepalive', False, '拉起失败：' + str(e)[:40])
+    else:
+        add('keepalive', True, '')
+
     # 6) 模拟大脑层健康（八层里能自动判的几层）
     ARCH = '/root/workspace/记忆档案'
 
