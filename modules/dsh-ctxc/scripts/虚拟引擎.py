@@ -136,6 +136,52 @@ def switch():
     log('切换失败（60 秒未就绪）')
     return False
 
+def find_main_pids():
+    """找到主引擎进程（bin.js web --port 3080）"""
+    pids = []
+    try:
+        out = subprocess.run(['ps', '-eo', 'pid,args'], capture_output=True, text=True, timeout=10).stdout
+        for line in out.splitlines():
+            if 'bin.js web' in line and '--port 3080' in line and 'grep' not in line:
+                pid = int(line.split()[0])
+                if pid != os.getpid():
+                    pids.append(pid)
+    except Exception:
+        pass
+    return pids
+
+def wait_ports_down(timeout=20):
+    for _ in range(timeout):
+        if not any(ok for _, _, ok in probe()):
+            return True
+        time.sleep(1)
+    return False
+
+def hot_restart():
+    """热重启：预检 → 优雅停主引擎 → 等端口释放 → 立即拉起 → 等就绪"""
+    problems = preflight()
+    if problems:
+        log('热重启中止：预检失败 -> ' + '; '.join(problems))
+        print('预检失败，拒绝重启: ' + '; '.join(problems))
+        return False
+    pids = find_main_pids()
+    if not pids:
+        log('主引擎不在，直接拉起')
+        return switch()
+    log('热重启：优雅停止主引擎 pids=%s' % pids)
+    import signal
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception as e:
+            log('停止 %d 失败: %s' % (pid, str(e)[:60]))
+    if not wait_ports_down(20):
+        log('热重启失败：端口 20 秒未释放')
+        print('端口未释放，重启失败（未强杀）')
+        return False
+    log('端口已释放，拉起新引擎')
+    return switch()
+
 def once(dry=False):
     problems = preflight()
     states = probe()
@@ -154,6 +200,10 @@ def once(dry=False):
 
 def main():
     args = sys.argv[1:]
+    if '--hot-restart' in args:
+        ok = hot_restart()
+        print('热重启' + ('成功' if ok else '失败'))
+        return
     if '--check' in args or not args:
         once(dry=False); return
     if '--dry' in args:
