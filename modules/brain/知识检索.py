@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # 知识检索.py — RAG 检索段：查询 → 向量相似度 top-k（近义可命中；仅检索，不建突触）。
-import os, sys, json, math, urllib.request
+import os, sys, json, math, urllib.request, re
 
 BRAIN = os.environ.get('BRAIN_ROOT', '/root/workspace/记忆档案')
 VEC = os.path.join(BRAIN, '知识', '.rag', 'vectors.json')
@@ -72,8 +72,35 @@ def main():
     scored = sorted([(cos(qv, it['vec']) + cond_boost(it), it) for it in store['items']], key=lambda x: -x[0])
     if region:
         scored = [(s, it) for s, it in scored if reg_of(it['id']) == region]
+    # 2026-11-25 混合检索：nomic 是英文模型，中文语义弱 → 并行跑关键词检索兜底
+    import subprocess as _sp
+    kw_files = []
+    try:
+        _r = _sp.run(['python3', '/root/workspace/记忆档案/查.py', query],
+                     capture_output=True, text=True, timeout=20)
+        for _line in (_r.stdout or '').splitlines():
+            _m = re.match(r'[\d.]+\s*\|\s*([^#|]+)', _line)
+            if _m:
+                kw_files.append(_m.group(1).strip())
+    except Exception:
+        pass
+    seen_ids = set()
+    printed = 0
     for s, it in scored[:topk]:
+        seen_ids.add(it['id'].split('#')[0])
         print('%.3f | [%s] | %s | %s' % (s, reg_of(it['id']), it['id'], it['text'][:60].replace('\n', ' ')))
+        printed += 1
+    # 关键词命中但向量没进前 k 的文件，补进来
+    for kf in kw_files:
+        if printed >= topk + 2:
+            break
+        if kf in seen_ids:
+            continue
+        for it in store['items']:
+            if it['id'].startswith(kf + '#'):
+                print('KW    | [关键词] | %s | %s' % (it['id'], it['text'][:60].replace('\n', ' ')))
+                printed += 1
+                break
 
 if __name__ == '__main__':
     main()
