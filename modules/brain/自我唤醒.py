@@ -101,6 +101,17 @@ def clean_reflection(text):
 
 LOCK = os.path.join(BRAIN, '连续性', '.wake.lock')
 
+IDX = os.path.join(BRAIN, '知识', '采集与学习索引.md')
+
+def log_idx(note):
+    """把自唤醒结果写进索引：成功/跳过/失败都要可见，防静默。"""
+    try:
+        import datetime as _dt
+        with open(IDX, 'a', encoding='utf-8') as f:
+            f.write('%s | 自我唤醒 | %s\n' % (_dt.datetime.now().strftime('%Y-%m-%d %H:%M'), note))
+    except Exception:
+        pass
+
 def acquire_lock(max_age=420):
     """单实例锁：已有实例在跑（锁未过期）就跳过，避免 ollama 慢时进程堆积。"""
     try:
@@ -115,6 +126,7 @@ def acquire_lock(max_age=420):
             alive = pid > 0 and os.path.exists('/proc/%d' % pid)
             if alive and age < max_age:
                 print(json.dumps({'跳过': '另一个自我唤醒在跑（pid %d，已 %.0f 秒）' % (pid, age)}, ensure_ascii=False))
+                log_idx('跳过：另一实例在跑（pid %d）' % pid)
                 return False
     except Exception:
         pass
@@ -174,6 +186,7 @@ def _main_body():
             out = clean_reflection((json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip())
     except Exception as e:
         print(json.dumps({'自省': 0, '错误': str(e)[:120]}, ensure_ascii=False))
+        log_idx('失败：ollama %s' % str(e)[:80])
         return
     if not out:
         print(json.dumps({'自省': 0}, ensure_ascii=False))
@@ -213,11 +226,14 @@ def _main_body():
                 out = out2
             else:
                 out = '（本轮自省未通过质量门：没有落到具体事/判据上。未验证，不假装有自省。）'
+            log_idx('质量门未过：重写也没落判据')
         except Exception:
             out = '（本轮自省未通过质量门：没有落到具体事/判据上。未验证，不假装有自省。）'
+            log_idx('质量门未过：重写也没落判据')
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
     with open(LOG, 'a', encoding='utf-8') as f:
         f.write('## %s\n\n%s\n\n' % (datetime.datetime.now().strftime('%Y-%m-%d %H:%M'), out))
+    log_idx('成功：%s' % out[:40].replace('\n', ' '))
     # 情感态更新：自省带出的情绪留下、慢慢消散（像真的心情）
     nm = classify_mood(out)
     if nm:
