@@ -227,6 +227,18 @@ def ollama_free(prompt):
         t.join()
     return random.choice(samples) if samples else ''
 
+BAD_IDEA = ('没有', '无关', '无法', '未知', '不清楚', '不相关', '奇怪', '不存在', '可能有关', '可能是')
+
+def idea_ok(a, b, idea):
+    """灵感质量门：不自己连自己；不写「没关系/无法判断」这种废话。"""
+    if not idea or len(str(idea).strip()) < 10:
+        return False
+    if a == b:
+        return False
+    if any(w in str(idea) for w in BAD_IDEA):
+        return False
+    return True
+
 def run_spark(cands, top_pairs, n_random=2):
     report = {'通点广播': 0, '随机连接': 0}
     os.makedirs(SYN.rstrip('synapses.jsonl'), exist_ok=True)
@@ -279,7 +291,7 @@ def run_spark(cands, top_pairs, n_random=2):
                 idea = ollama_free('自由联想，不要解释，只说一句 20 字以内的话：' + a + ' 与 ' + b + ' 之间可能有什么联系？')
             except Exception:
                 idea = ''
-            if idea:
+            if idea and idea_ok(a, b, idea):
                 lines.append('- %s ↔ %s → %s' % (a, b, idea))
                 # 火花不是突触：spark_random 只进灵感文件，不写 synapses（2026-11-25 修正）
                 with open(SPARK, 'a', encoding='utf-8') as f:
