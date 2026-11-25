@@ -13,6 +13,10 @@ NOTE = os.path.join(BRAIN, '本地模型学习.md')
 LOG = os.path.join(BRAIN, '连续性', '自省日志.md')
 FACT = os.path.join(BRAIN, '连续性', '今日事实.md')   # 今天到底发生了什么；没有事实就不许说"没用到"
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completions')
+# 2026-11-25：自省优先走云端（本地 1.5B 不稳定，有时 100s、有时 2.5min+ 卡死）
+CLOUD_API = os.environ.get('CTXC_CLOUD_API', 'http://127.0.0.1:18326/v1/chat/completions')
+CLOUD_KEY = os.environ.get('CTXC_CLOUD_KEY', 'ofm-iVnqctXF-pb0Xf7jCUifSyjZtrrV9wtN')
+CLOUD_MODEL = os.environ.get('CTXC_CLOUD_MODEL', 'deepseek-official/deepseek-flash')
 MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
 MOOD_FILE = os.path.join(BRAIN, '连续性', '情感态.json')
 EMOTION = os.path.join(BRAIN, '情绪记忆.md')
@@ -182,15 +186,30 @@ def _main_body():
     body = {'model': MODEL, 'messages': [{'role': 'user', 'content': prompt}],
             'max_tokens': 100, 'temperature': 1.6, 'top_p': 0.99,
             'seed': int.from_bytes(os.urandom(4), 'big'), 'stream': False}
-    req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(),
-                                 headers={'Content-Type': 'application/json'})
+    # 先云端（5-10s），失败再本地兜底
+    out = ''
+    _src = '云端'
     try:
-        with urllib.request.urlopen(req, timeout=300) as r:
+        cbody = {'model': CLOUD_MODEL, 'messages': [{'role': 'user', 'content': prompt}],
+                 'max_tokens': 100, 'stream': False, 'reasoning_effort': 'none'}
+        creq = urllib.request.Request(CLOUD_API, data=json.dumps(cbody).encode(),
+                                      headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CLOUD_KEY})
+        with urllib.request.urlopen(creq, timeout=60) as r:
             out = clean_reflection((json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip())
     except Exception as e:
-        print(json.dumps({'自省': 0, '错误': str(e)[:120]}, ensure_ascii=False))
-        log_idx('失败：ollama %s' % str(e)[:80])
-        return
+        log_idx('云端失败转本地：%s' % str(e)[:60])
+        out = ''
+    if not out:
+        _src = '本地'
+        req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(),
+                                     headers={'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(req, timeout=300) as r:
+                out = clean_reflection((json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip())
+        except Exception as e:
+            print(json.dumps({'自省': 0, '错误': str(e)[:120]}, ensure_ascii=False))
+            log_idx('失败：ollama %s' % str(e)[:80])
+            return
     if not out:
         print(json.dumps({'自省': 0}, ensure_ascii=False))
         return
@@ -243,7 +262,7 @@ def _main_body():
     with open(LOG, 'a', encoding='utf-8') as f:
         f.write('## %s\n\n%s\n\n' % (datetime.datetime.now().strftime('%Y-%m-%d %H:%M'), out))
     if '未过质量门' not in out:
-        log_idx('成功：%s' % out[:40].replace('\n', ' '))
+        log_idx('成功(%s)：%s' % (_src, out[:40].replace('\n', ' ')))
     # 情感态更新：自省带出的情绪留下、慢慢消散（像真的心情）
     nm = classify_mood(out)
     if nm:
