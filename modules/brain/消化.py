@@ -45,7 +45,11 @@ def main():
     if action not in ('remember', 'drop', 'keep'):
         print('action 必须是 remember / drop / keep'); return
     d = load()
-    d[name] = {'action': action, 'at': time.strftime('%Y-%m-%d %H:%M:%S')}
+    rec = {'action': action, 'at': time.strftime('%Y-%m-%d %H:%M:%S')}
+    # 可选：--summary "我的总结"（转化=自己总结，不是搬运原文）
+    if len(sys.argv) > 3 and sys.argv[3] == '--summary' and len(sys.argv) > 4:
+        rec['summary'] = sys.argv[4]
+    d[name] = rec
     save(d)
     print('已标记 %s → %s' % (name, action))
     status()
