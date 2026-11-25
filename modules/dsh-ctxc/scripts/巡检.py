@@ -5,7 +5,7 @@
 用法：python3 巡检.py [--quiet]
   --quiet 时只在有异常时输出（给定时任务用）
 """
-import sys, os, json, subprocess, urllib.request, urllib.error
+import sys, os, json, subprocess, urllib.request, urllib.error, glob, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -64,6 +64,37 @@ def main():
     # 5) 常驻进程（判据表）
     for name, pattern in J.PROCESS_CHECKS:
         add(name, proc_running(pattern), '')
+
+    # 6) 模拟大脑层健康（八层里能自动判的几层）
+    ARCH = '/root/workspace/记忆档案'
+
+    def newest(pattern):
+        fs = glob.glob(pattern)
+        return max((os.path.getmtime(f) for f in fs), default=None)
+
+    def fresh(name, pattern, max_age_s):
+        m = newest(pattern)
+        if m is None:
+            add('层·%s' % name, False, '无文件')
+        else:
+            age_h = (time.time() - m) / 3600
+            add('层·%s' % name, age_h <= max_age_s / 3600, '%.1f 小时前' % age_h)
+
+    fresh('突触', ARCH + '/突触/synapses.jsonl', 24 * 3600)
+    fresh('思维流', ARCH + '/突触/思维流-*.md', 72 * 3600)
+    fresh('灵感火花', ARCH + '/突触/灵感-*.md', 7 * 86400)
+    fresh('调酒器', ARCH + '/调酒器/产出-*.md', 7 * 86400)
+    fresh('知识', ARCH + '/知识/*.md', 7 * 86400)
+
+    # 感知层：24 小时内必须有「有效」条目（非未取到）
+    try:
+        import datetime as _dt
+        today = _dt.date.today().isoformat()
+        txt = open(ARCH + '/感知/感知日志.md', encoding='utf-8').read()
+        valid = [l for l in txt.splitlines() if today in l and '未取到' not in l and l.startswith('|')]
+        add('层·感知(今日有效条目)', len(valid) > 0, '%d 条' % len(valid))
+    except Exception as e:
+        add('层·感知(今日有效条目)', False, str(e)[:60])
 
     # 6) 输出
     bad = [r for r in rows if not r[1]]
