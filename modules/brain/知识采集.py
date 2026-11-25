@@ -30,9 +30,28 @@ def main():
     open(raw_path, 'w', encoding='utf-8').write(text)
 
     # 全文走 ctxc 混合并发（断点续传：中断重跑自动补）
-    out = subprocess.run(['python3', CTXC, args.file, '--keep-paths'],
-                         capture_output=True, text=True, timeout=3600)
-    summary = out.stdout.strip()
+    # 压缩：限时 180 秒；超时/失败走规则兜底（不让知识变空壳）
+    summary = ''
+    try:
+        out = subprocess.run(['python3', CTXC, args.file, '--keep-paths'],
+                             capture_output=True, text=True, timeout=180)
+        summary = (out.stdout or '').strip()
+    except subprocess.TimeoutExpired:
+        summary = ''
+    except Exception:
+        summary = ''
+    if not summary:
+        # 规则兜底：原文导语 + 含数字/结论的句子
+        try:
+            raw = open(args.file, encoding='utf-8', errors='ignore').read()
+            import re as _re
+            flat = _re.sub(r'\s+', ' ', raw).strip()
+            lead = flat[:200]
+            sents = _re.split(r'(?<=[。！？；])', flat)
+            picks = [x.strip() for x in sents if 20 <= len(x.strip()) <= 160 and _re.search(r'\d|结论|说明|表明|发现|建议|方法|机制', x)][:3]
+            summary = '**规则摘要（模型压缩超时/失败，规则兜底）**：\n\n' + lead + ('\n\n关键句：\n' + '\n'.join('- ' + x for x in picks) if picks else '')
+        except Exception:
+            summary = '（压缩失败，原文已归档）'
 
     know_path = os.path.join(KNOW, '%s-%s.md' % (today, args.title))
     header = (
