@@ -40,6 +40,11 @@
    - Ollama 保活（每 5 分钟）：检查本地端口，不在就重启 serve
 3. 首次运行前：按 [发布清单模板](modules/brain/发布清单模板.md) 建好自己的 BRAIN_ROOT/发布清单.md。
 
+## 最近更新（2026-11-25）
+
+- 模拟大脑公开知识库 [dsh-knowledge](https://github.com/zwf123hyj123/dsh-knowledge) 收录了两份新整理：**DSH 生态痛点汇总**（14 条社区痛点 + 「状态一致性」共性判断）与 **自用插件改进建议**（上下文压缩/加载优化/调整面板等 5 个插件的可执行清单）。
+- 架构名说明：本地称呼「德缪哥矩阵」，外发版沿用旧名「模拟大脑」。
+
 ## 出处与致谢
 
 - 记忆分层与 Dreaming 回查纠错思想：Anthropic《The components of agent memory》
