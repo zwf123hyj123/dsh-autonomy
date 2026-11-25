@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # 知识向量库.py — RAG 库段：把知识区条目向量化，存本地向量库（仅库与检索用，不替代突触）。
-import os, json, glob, re, hashlib, datetime, urllib.request, sys
+import os, json, glob, re, datetime, urllib.request, sys
 
 BRAIN = os.environ.get('BRAIN_ROOT', '/root/workspace/记忆档案')
 KNOW = os.path.join(BRAIN, '知识')
@@ -37,7 +37,9 @@ def chunks_of(text, cap=400):
 
 def main():
     files = sorted(glob.glob(KNOW + '/*.md'))
-    files = [f for f in files if not any(k in f for k in ('.rag', '动态', '约定', '索引', '原始'))]
+    # 2026-11-25 修：日志/元文件不向量化（判断 86，与 思维碰撞/自检/转化率 同口径）
+    META = ('.rag', '动态', '约定', '索引', '原始', 'QQ-对话记录', '判据体检报告', '网络可达性', '官方源日志-', '感知-')
+    files = [f for f in files if not any(k in f for k in META)]
     items = []
     for f in files:
         txt = open(f, encoding='utf-8').read()
@@ -47,7 +49,7 @@ def main():
     os.makedirs(RAG, exist_ok=True)
     # 2026-11-25 改增量：读旧库按 text hash 复用向量，只 embed 新/变更块
     # （原来全量 256 块 × 1-2 秒 = 4-8 分钟，超过 300s 超时重建不完）
-    import hashlib as _hl
+    import hashlib as _hl  # 2026-11-25 恢复：清理脚本误删（hashlib 别名）
     cache = {}
     try:
         _old = json.load(open(VEC, encoding='utf-8'))

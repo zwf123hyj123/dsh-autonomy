@@ -33,9 +33,13 @@ def check_knowledge():
         d = json.load(open(os.path.join(KNOW, '.digested.json'), encoding='utf-8'))
     except Exception:
         d = {}
-    META = {'我的总结.md', '采集与学习索引.md'}
+    META = {'我的总结.md', '采集与学习索引.md', '采集约定.md', 'QQ-对话记录.md', '判据体检报告.md',
+            'EigenFlux-动态.md', '网络可达性.md'}  # 日志/元文件不是知识（判断 86，与 转化率.py 同口径）
+    META_PREFIX = ('官方源日志-', '感知-')
+    def is_meta(name):
+        return name in META or any(name.startswith(p) for p in META_PREFIX)
     week = [f for f in glob.glob(KNOW + '/*.md')
-            if os.path.getmtime(f) >= time.time() - 7 * 86400 and os.path.basename(f) not in META]
+            if os.path.getmtime(f) >= time.time() - 7 * 86400 and not is_meta(os.path.basename(f))]
     pending = [f for f in week if os.path.basename(f) not in d]
     return _ok(len(pending) == 0, '知识 %d 条，待消化 0' % len(week), '待消化 %d 条' % len(pending))
 
@@ -45,6 +49,8 @@ def check_synapse():
     except Exception:
         recs = []
     KNOWN_2 = {'酒架', '突触', '海马体', '调酒器', '模拟大脑', '德缪哥矩阵', '知识', '记忆'}
+    # 日志来源不是知识，行内共现是偶然的（判断 86，与 突触清洗.py 的 NOISE_SOURCES 对齐）
+    NOISE_SOURCES = ('采集与学习索引', '采集约定', '官方源日志', '巡查日志', '自治日志', 'EigenFlux-动态', 'QQ-对话记录', '感知-2026', '网络可达性', '判据体检报告')
     def _bad(v):
         v = str(v)
         if not v:
@@ -55,6 +61,8 @@ def check_synapse():
     bad = 0
     for r in recs:
         if _bad(r.get('from')) or _bad(r.get('to')):
+            bad += 1
+        elif any(n in str(r.get('text', '')) for n in NOISE_SOURCES):
             bad += 1
     return _ok(len(recs) >= 10 and bad == 0, '突触 %d 条，实体对实体' % len(recs), '突触 %d 条中有 %d 条垃圾' % (len(recs), bad))
 
@@ -103,10 +111,15 @@ def check_consistency():
     r = subprocess.run(['python3', os.path.join(ARCH, '判据同步.py')], capture_output=True, text=True, timeout=60)
     if '缺失 0' not in (r.stdout or ''):
         issues.append('判据速查落后')
-    # 关键词索引 vs 知识最新
+    # 关键词索引 vs 知识最新（2026-11-25 修：排除日志/元文件——与建索引/向量库同口径，日志一写不再误报）
+    META2 = {'我的总结.md', '采集与学习索引.md', '采集约定.md', 'QQ-对话记录.md', '判据体检报告.md',
+             'EigenFlux-动态.md', '网络可达性.md'}
+    PREFIX2 = ('官方源日志-', '感知-')
     try:
         idx_t = os.path.getmtime(os.path.join(KNOW, '.index.json'))
-        newest = max(os.path.getmtime(f) for f in glob.glob(KNOW + '/*.md'))
+        newest = max(os.path.getmtime(f) for f in glob.glob(KNOW + '/*.md')
+                     if os.path.basename(f) not in META2
+                     and not any(os.path.basename(f).startswith(x) for x in PREFIX2))
         if idx_t < newest - 60:
             issues.append('关键词索引陈旧')
     except Exception:

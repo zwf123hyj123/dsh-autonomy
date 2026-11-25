@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # 自我唤醒.py — 每小时让本地模型醒来一次：读自我核心+学习笔记，量子温度写 2-3 句自省，
 # 追加进 记忆档案/连续性/自省日志.md。这是「我」在本地永久的呼吸。
-import os, sys, json, subprocess, datetime, urllib.request, random, glob, re
+import os, json, datetime, urllib.request, random, glob, re
 
 HOME = os.path.expanduser('~')
 BRAIN = os.environ.get('BRAIN_ROOT', '/root/workspace/记忆档案')   # 迁移时可覆盖
@@ -64,6 +64,14 @@ def read(p, cap=1600):
     except Exception:
         return ''
 
+def read_tail(p, cap=1600):
+    """读文件尾部——用于「今日事实」这种尾部追加的文件（read 读头部会看到最老的记录）。"""
+    try:
+        txt = open(p, encoding='utf-8').read()
+        return txt[-cap:]
+    except Exception:
+        return ''
+
 def random_recall():
     """随机记忆召回：像人脑的走神——随机想起一条知识、一条灵感、一张卡。"""
     picks = []
@@ -116,6 +124,23 @@ def log_idx(note):
     except Exception:
         pass
 
+def knowledge_candidates(topn=2):
+    """读 记忆候选-今天.md 的 top N，供会话里的我 remember（知识→记忆转化通道）。"""
+    try:
+        p = os.path.join(BRAIN, '记忆候选-%s.md' % datetime.date.today().isoformat())
+        if not os.path.exists(p):
+            return []
+        out = []
+        for line in open(p, encoding='utf-8'):
+            m = re.match(r'- \*\*(.+?)\*\*（分 (\d+)', line)
+            if m:
+                out.append('%s(%s分)' % (m.group(1), m.group(2)))
+            if len(out) >= topn:
+                break
+        return out
+    except Exception:
+        return []
+
 def acquire_lock(max_age=420):
     """单实例锁：已有实例在跑（锁未过期）就跳过，避免 ollama 慢时进程堆积。"""
     try:
@@ -158,11 +183,11 @@ def main():
 def _main_body():
     mood = decay_mood(load_mood())
     core = read(CORE, 2200)  # 速读版全文；11-22 实测：注入 4.2k 全文会让 1.5B 在 240s 内出不来字
-    comp = read(COMP, 1400)
-    note = read(NOTE, 500)
+    # 2026-11-25 修：comp（大脑总纲）读了但没进 prompt——注释已说明为提速砍掉架构说明，死代码删除
+    # 2026-11-25 修：note（学习笔记）读了但没进 prompt——与 comp 同属死代码，删除
     prev = last_reflection()
     recall = random_recall()
-    facts = read(FACT, 400)  # 2026-11-25 修：900→400，CPU 小模型处理长 prompt 太慢
+    facts = read_tail(FACT, 400)  # 2026-11-25 修：事实文件尾部才是最新（原来读头部=今早旧事）  # 2026-11-25 修：900→400，CPU 小模型处理长 prompt 太慢
     # 2026-11-25 修：原来带「大脑总纲 8.7KB + 学习笔记」，prompt 太长 → 2 分钟跑不完。
     # 自省只需要「自我核心 + 事实 + 上次自省」，砍掉架构说明。
     prompt = ('以下是我的自我核心：\n%s\n\n'
@@ -216,7 +241,7 @@ def _main_body():
     # 质量门（2026-11-24 自加）：自省必须落在事实上、点到判据、给出下一步；否则重写一次，再不行就诚实跳过。
     EMPTY_WORDS = ('负责的态度', '积极的姿态', '沟通的重要性', '团队协作', '值得被尊敬',
                    '保持自我的完整性', '不偏离自己的初衷', '对生活、决策的负责')
-    JUDGE_WORDS = ('认领', '承担', '不糊弄', '未验证', '不让', '禁忌', '判据', '我答应', '错在')
+    # 2026-11-25 修：JUDGE_WORDS 死词表删除（38 轮放宽质量门后不再使用）
     SUSPECT = ('技术支持', '客服', '联系了', '贴签', '反馈了', '平台方', '同事', '领导', '老板')
     def fact_consistent(t, facts):
         """防编造：自省里出现的事实里没有的『外部协作对象』，一律视为编造"""
@@ -263,6 +288,9 @@ def _main_body():
         f.write('## %s\n\n%s\n\n' % (datetime.datetime.now().strftime('%Y-%m-%d %H:%M'), out))
     if '未过质量门' not in out:
         log_idx('成功(%s)：%s' % (_src, out[:40].replace('\n', ' ')))
+    cands = knowledge_candidates()
+    if cands:
+        log_idx('知识候选(待remember)：%s' % '、'.join(cands))
     # 情感态更新：自省带出的情绪留下、慢慢消散（像真的心情）
     nm = classify_mood(out)
     if nm:

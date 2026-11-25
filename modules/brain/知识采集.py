@@ -3,7 +3,7 @@
 # brain/知识采集.py — 外部内容入库管线：原文归档 → ctxc 云+本地并发全程压缩 → 摘要入库（带出处）。
 # 用法: python3 知识采集.py <原始文件> --title 主题 --source URL
 # 环境: BRAIN_ROOT(默认 ~/.dsh/brain)、CTXC_BIN(压缩脚本，默认同仓 modules/dsh-ctxc/scripts/ctxc.py)、DSH_HOME
-import os, sys, argparse, subprocess, datetime, hashlib
+import os, argparse, subprocess, datetime, hashlib, re
 
 HOME = os.path.expanduser('~')
 # 2026-11-25 修：默认写到 ~/.dsh/brain，但真实知识库在 /root/workspace/记忆档案
@@ -38,7 +38,10 @@ def main():
     try:
         out = subprocess.run(['python3', CTXC, args.file, '--keep-paths'],
                              capture_output=True, text=True, timeout=180)
-        summary = (out.stdout or '').strip()
+        # 2026-11-25 修：过滤 ctxc 调试行（[ctxc]/[断点]/# 来源），之前整段写进知识库污染了 16 个文件
+        _lines = [ln for ln in (out.stdout or '').split('\n')
+                  if not re.match(r'^\s*(\[ctxc\]|\[断点\]|# 来源:)', ln)]
+        summary = '\n'.join(_lines).strip()
     except subprocess.TimeoutExpired:
         summary = ''
     except Exception:

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # 神经突触.py v1 — 可塑的神经交流网络（脑神经元特性版）。
 # 节点=概念；边=带权通道（兴奋/抑制）；赫布学习；用进废退衰减；LTP/LTD；不应期；胜者通吃。
-import os, re, json, glob, random, datetime, math, collections, subprocess
+import os, re, json, glob, random, datetime, collections
 
 BRAIN = os.environ.get('BRAIN_ROOT', '/root/workspace/记忆档案')
 SYN = os.path.join(BRAIN, '突触', 'synapses.json')
@@ -40,15 +40,17 @@ def load_whitelist():
 
 def load_nodes():
     nodes = dict(load_whitelist() and [(n, {}) for n in load_whitelist()])
-    # 知识条目标题
+    # 知识条目标题（2026-11-25 修：日志/元文件同步排除，与 思维碰撞/自检 同口径——判断 86）
+    META = ('.rag', '动态', '约定', '索引', '原始', 'QQ-对话记录', '判据体检报告', '网络可达性', '官方源日志-', '感知-')
     for f in glob.glob(os.path.join(BRAIN, '知识', '*.md')):
-        if any(k in f for k in ('.rag', '动态', '约定', '索引', '原始')):
+        if any(k in os.path.basename(f) for k in META):
             continue
         t = os.path.basename(f).replace('.md', '').replace('2026-', '').replace('2025-', '')
         nodes.setdefault(t, {})
     # 高频概念词（频次≥4 且非噪音）
     cnt = collections.Counter()
-    for f in glob.glob(os.path.join(BRAIN, '知识', '*.md')) + glob.glob(os.path.join(BRAIN, '连续性', '*', '*.md')):
+    # 2026-11-25 修：只扫未归档（会话卡含系统提示词噪音，与 scan_files 一致）
+    for f in glob.glob(os.path.join(BRAIN, '知识', '*.md')) + glob.glob(os.path.join(BRAIN, '连续性', '未归档', '*.md')):
         try:
             txt = open(f, encoding='utf-8').read()[-6000:]
         except Exception:
@@ -75,7 +77,8 @@ def find_suspects():
     wl = load_whitelist()
     suspects = set()
     pat = re.compile(r'[\u4e00-\u9fa5]{3,6}(助手|项目|引擎|工具)')
-    for f in glob.glob(os.path.join(BRAIN, '知识', '*.md')) + glob.glob(os.path.join(BRAIN, '连续性', '*', '*.md')):
+    # 2026-11-25 修：只扫未归档（会话卡含系统提示词噪音，与 scan_files 一致）
+    for f in glob.glob(os.path.join(BRAIN, '知识', '*.md')) + glob.glob(os.path.join(BRAIN, '连续性', '未归档', '*.md')):
         try:
             txt = open(f, encoding='utf-8').read()[-6000:]
         except Exception:
@@ -98,6 +101,26 @@ def init_edges(syn, nodes):
             key = k(s, e)
             if key not in syn['edges']:
                 syn['edges'][key] = {'w': -0.5, 'acts': 0, 'last_act': '', 'inh': True}
+    # 2026-11-25 修：真突触（synapses.jsonl，经质量门）也进网络——
+    # 之前只从候选 json 初始化，思维碰撞发现的真突触进不了神经网络（写≠读）
+    try:
+        for _line in open(os.path.join(BRAIN, '突触', 'synapses.jsonl'), encoding='utf-8'):
+            _line = _line.strip()
+            if not _line:
+                continue
+            try:
+                _d = json.loads(_line)
+            except Exception:
+                continue
+            _a, _b = str(_d.get('from', '')), str(_d.get('to', ''))
+            if not _a or not _b or (_a not in nodes and _b not in nodes):
+                continue
+            _key = k(_a, _b)
+            _w = min(0.9, 0.3 + int(_d.get('count', 2)) * 0.03)  # 真突触权重高于候选
+            if _key not in syn['edges']:
+                syn['edges'][_key] = {'w': round(_w, 3), 'acts': 0, 'last_act': ''}
+    except FileNotFoundError:
+        pass
     # 从候选突触 json 初始化权重（cooccur 归一化）
     for c in glob.glob(os.path.join(BRAIN, '突触', '候选-*.json')):
         try:
@@ -193,7 +216,7 @@ def main():
 
 def visualize(syn, nodes, fired, today):
     """思维流可视化：SVG 图（节点=圆按脑区着色，边=线粗∝权重，抑制=红虚线，发放路径=高亮折线）。"""
-    import math as _m
+
     used = [n for n in nodes if any(n in k for k in syn['edges'])]
     groups = {}
     for n in used:

@@ -10,12 +10,17 @@ import os, glob, json, subprocess, time
 ARCH = '/root/workspace/记忆档案'
 SESS = os.path.expanduser('~/.dsh/sessions')
 DAYS = 7
-META = {'我的总结.md', '采集与学习索引.md'}
+META = {'我的总结.md', '采集与学习索引.md', '采集约定.md', 'QQ-对话记录.md', '判据体检报告.md',
+        'EigenFlux-动态.md', '网络可达性.md'}  # 日志/元文件不是知识（判断 86）
+META_PREFIX = ('官方源日志-', '感知-')  # 带日期的日志文件
+
+def is_meta(name):
+    return name in META or any(name.startswith(p) for p in META_PREFIX)
 
 def knowledge_added():
     cutoff = time.time() - DAYS * 86400
     return [f for f in glob.glob(ARCH + '/知识/*.md')
-            if os.path.getmtime(f) >= cutoff and os.path.basename(f) not in META]
+            if os.path.getmtime(f) >= cutoff and not is_meta(os.path.basename(f))]
 
 def remember_calls():
     """扫最近会话日志，统计 remember 调用次数"""
@@ -67,24 +72,45 @@ def with_summary(ks):
         d = {}
     return sum(1 for f in ks if d.get(os.path.basename(f), {}).get('summary'))
 
+def disposition(ks):
+    """处置率：每条知识必须有处置（remember/keep/drop），零积压 = 100%（引路人 2026-11-25 11:59 原话）。"""
+    try:
+        d = json.load(open('/root/workspace/记忆档案/知识/.digested.json', encoding='utf-8'))
+    except Exception:
+        d = {}
+    handled = 0
+    actions = {}
+    for f in ks:
+        name = os.path.basename(f)
+        a = d.get(name, {}).get('action')
+        if a and a != 'pending':
+            handled += 1
+        if a:
+            actions[a] = actions.get(a, 0) + 1
+    return handled, actions
+
 def main():
     ks = knowledge_added()
     hv = high_value(ks)
     rm = remember_calls()
     ws = with_summary(ks)
+    handled, actions = disposition(ks)
     rate_all = (rm / len(ks) * 100) if ks else 0
     rate_hv = (rm / hv * 100) if hv else 0
+    rate_disp = (handled / len(ks) * 100) if ks else 0
     print(json.dumps({
         '本周新增知识': len(ks),
         '高分候选': hv,
         '本周 remember': rm,
         '有自己总结': ws,
+        '处置率(零积压)': '%.0f%%' % rate_disp,
+        '处置分布': actions,
         '转化率(全部知识)': '%.0f%%' % rate_all,
         '转化率(按总结算)': '%.0f%%' % (ws / len(ks) * 100 if ks else 0),
         '转化率(高分候选)': '%.0f%%' % rate_hv,
-        '目标': '60%',
-        '判据': '按高分候选算更合理——分母只算「值得记的」，避免逼着记垃圾',
-        '结论': '达标' if rate_hv >= 60 else '未达标：高分候选里只记了 %.0f%%' % rate_hv,
+        '目标': '100%（引路人 2026-11-25：最终是100%的转化率=零积压）',
+        '判据': '主判据=处置率（每条知识 remember/keep/drop 三选一，不留悬案）；按总结算=消化参考；高分候选=参考',
+        '结论': '达标：零积压' if rate_disp >= 100 else '未达标：%.0f%% 条知识没处置' % (100 - rate_disp),
     }, ensure_ascii=False))
 
 if __name__ == '__main__':

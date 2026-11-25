@@ -38,6 +38,9 @@ def main():
     st = load(); today = datetime.date.today().isoformat()
     out = []
     out.append(run(os.path.join(B, '判据索引.py')))
+    # 2026-11-25 修：判据索引变了，判据向量必须跟着重建（写≠读：85/86 曾因向量落后匹配不到）
+    vec = run(os.path.join(B, '判据向量.py'))
+    out.append(vec or '判据向量：跳过（ollama 离线）')
     stat = run(os.path.join(B, '判据调用.py'), '--统计')
     out.append(stat.split('\n')[0])
     if st.get('spark') != today:
@@ -47,6 +50,40 @@ def main():
     if st.get('syn') != list(week):
         out.append('突触清理：见 synapses.bak，本周已清')
         st['syn'] = list(week)
+    # 2026-11-25 加：近一次对话缓存清理（preload 只用最近的；保留 cur-talk + 最近 3 个）
+    try:
+        import glob as _g2
+        _nd = os.path.join(B, '近一次对话')
+        _nf = sorted(_g2.glob(os.path.join(_nd, '*.md')), key=os.path.getmtime)
+        _keep2 = set(_nf[-3:]) | {os.path.join(_nd, 'cur-talk.md')}
+        _rm2 = 0
+        for _f in _nf:
+            if _f not in _keep2:
+                try:
+                    os.remove(_f); _rm2 += 1
+                except Exception:
+                    pass
+        if _rm2:
+            out.append('近一次对话清理：%d 个旧缓存' % _rm2)
+    except Exception:
+        pass
+    # 2026-11-25 加：断点目录清理（保留 common.json + 最近 50 个，防无限增长）
+    try:
+        import glob as _glob
+        _bd = os.path.join(B, '连续性', '断点')
+        _bf = sorted(_glob.glob(os.path.join(_bd, '*.json')), key=os.path.getmtime)
+        _keep = set(_bf[-50:]) | {os.path.join(_bd, 'common.json')}
+        _rm = 0
+        for _f in _bf:
+            if _f not in _keep:
+                try:
+                    os.remove(_f); _rm += 1
+                except Exception:
+                    pass
+        if _rm:
+            out.append('断点清理：%d 个旧断点' % _rm)
+    except Exception:
+        pass
     # 预测结算提醒：到期未结算的列出来，不自动改结果（对错要我自己判）
     import re
     pl = os.path.join(B, '预测', '预测日志.md')

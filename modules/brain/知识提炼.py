@@ -23,7 +23,24 @@ CONCL = re.compile(r'发现|结论|证明|验证|反证')
 INTEL = re.compile(r'情报|官方源|点位|缺口|运价|指数|股市|制裁|仓位')
 TABLE = re.compile(r'^\|', re.M)
 
+# 日志/元文件不是知识，不参与提炼（判断 86）
+META = {'采集与学习索引.md', '采集约定.md', '我的总结.md', 'QQ-对话记录.md', '判据体检报告.md',
+        'EigenFlux-动态.md', '网络可达性.md'}
+META_PREFIX = ('官方源日志-', '感知-')
+
+STATE = os.path.join(KNOW, '.digested.json')
+
 def score_file(path):
+    name = os.path.basename(path)
+    if name in META or any(name.startswith(p) for p in META_PREFIX):
+        return None
+    # 2026-11-25 修：已 remember 的不再进候选（之前候选不排除已消费的，会重复推荐）
+    try:
+        _d = json.load(open(STATE, encoding='utf-8'))
+        if _d.get(name, {}).get('action') == 'remember':
+            return None
+    except Exception:
+        pass
     try:
         txt = open(path, encoding='utf-8').read()
     except Exception:
@@ -31,7 +48,6 @@ def score_file(path):
     score = 0
     reasons = []
     # 类型判断：情报/数据类不进记忆（会过期，按需检索）
-    name = os.path.basename(path)
     if INTEL.search(name) or len(TABLE.findall(txt)) > 6:
         score -= 3
         reasons.append('情报/数据类（不推荐进记忆）')
@@ -55,10 +71,11 @@ def main():
     rows.sort(key=lambda r: -r['score'])
     with open(OUT, 'w', encoding='utf-8') as f:
         f.write('# 记忆候选（%s）\n\n' % time.strftime('%Y-%m-%d'))
-        f.write('> 本周知识 %d 条；目标转化率 60%%，建议本轮 remember 前 %d 条。\n\n' % (len(rows), max(1, len(rows) * 6 // 10)))
+        # 2026-11-25 修：建议条数不超过实际列出的候选数（原来建议 30 但只列 15，数字误导）
+        f.write('> 本周知识 %d 条；目标转化率 60%%，建议本轮 remember 前 %d 条。\n\n' % (len(rows), max(1, min(15, len(rows) * 6 // 10))))
         for r in rows[:15]:
             f.write('- **%s**（分 %d：%s）\n  %s\n' % (r['file'], r['score'], '、'.join(r['reasons']), r['excerpt']))
-    print(json.dumps({'本周知识': len(rows), '建议remember': max(1, len(rows) * 6 // 10),
+    print(json.dumps({'本周知识': len(rows), '建议remember': max(1, min(15, len(rows) * 6 // 10)),
                       '候选文件': os.path.basename(OUT)}, ensure_ascii=False))
 
 if __name__ == '__main__':
