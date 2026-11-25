@@ -1,26 +1,23 @@
-// 出处：手机 proot 实测版 local-ctxc（Android + Ollama 1.5B Q4_K_M 实测调参）。
-// 模块：压一下胶囊 / 每轮自动会话卡。相关方案见 docs/、scripts/ctxc.py。
 import { execFile } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdirSync, statSync, readdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 
-export const name = 'dsh-ctxc'
+export const name = 'local-ctxc'
 
-const HOME = process.env.HOME || '/root'
-const DSH_HOME = process.env.DSH_HOME || join(HOME, '.dsh')
-const API = process.env.CTXC_API || 'http://127.0.0.1:11436/v1/chat/completions'
-const MODEL = process.env.CTXC_MODEL || 'qwen2.5:1.5b-instruct'
-const CARD_DIR = process.env.CTXC_CARD_DIR || join(DSH_HOME, 'ctxc-cards')
-const LAZ = join(DSH_HOME, 'skills/lazarus/scripts')
-const SESS_ROOT = join(DSH_HOME, 'sessions')
-const MAX_LOCAL = parseInt(process.env.CTXC_MAX_LOCAL || '2600', 10)
-const CHUNK = parseInt(process.env.CTXC_CHUNK || '380', 10)
-const MAX_TOKENS = parseInt(process.env.CTXC_MAX_TOKENS || '45', 10)
+const API = 'http://127.0.0.1:11436/v1/chat/completions'
+const MODEL = 'qwen2.5:1.5b-instruct'
+const MAX_LOCAL = 2600
+const CHUNK = 380
+const MAX_TOKENS = 45
+const LAZ = join(process.env.HOME || '/root', '.dsh/skills/lazarus/scripts')
+const SESS_ROOT = join(process.env.HOME || '/root', '.dsh/sessions')
+const CARD_DIR = '/root/workspace/记忆档案/连续性/会话卡'
+const MAIN_CARD = '/root/workspace/记忆档案/连续性/本线主卡.md'
+const STATE = join(CARD_DIR, '.state.json')
 const COOLDOWN_MS = 120_000
 const MAX_LOG_BYTES = 20 * 1024 * 1024
 
 const SYSTEM = '你是上下文压缩器。把输入压缩成中文要点，每点不超过20字；保留数字、名称、结论，去掉客套与重复。只输出要点，不要解释。'
-const STATE = join(CARD_DIR, '.state.json')
 
 function loadState() {
   try { return JSON.parse(readFileSync(STATE, 'utf-8')) } catch { return {} }
@@ -30,33 +27,60 @@ function saveState(s) {
   writeFileSync(STATE, JSON.stringify(s))
 }
 
+async function compressChunk(c, signal, prev) {
+  const sys = prev ? SYSTEM + '\n上段要点（供衔接，不要重复）：' + prev : SYSTEM
+  const res = await fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: c },
+      ],
+      max_tokens: MAX_TOKENS,
+      stream: false,
+    }),
+    signal,
+  })
+  if (!res.ok) throw new Error('HTTP ' + res.status)
+  const j = await res.json()
+  const out = ((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '').trim()
+  return out
+}
+
 async function compressLocal(text, signal) {
   const chunks = []
   for (let i = 0; i < text.length; i += CHUNK) chunks.push(text.slice(i, i + CHUNK))
   const outs = []
-  for (const c of chunks) {
+  // 2 路并发，上一批的末条要点作为下一批的衔接上下文
+  let prev = ''
+  for (let i = 0; i < chunks.length; i += 2) {
     if (signal && signal.aborted) throw new Error('aborted')
-    const res = await fetch(API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM },
-          { role: 'user', content: c },
-        ],
-        max_tokens: MAX_TOKENS,
-        stream: false,
-      }),
-      signal,
-    })
-    if (!res.ok) throw new Error('HTTP ' + res.status)
-    const j = await res.json()
-    const out = ((j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '').trim()
-    if (out) outs.push(out)
+    const batch = chunks.slice(i, i + 2)
+    const results = await Promise.all(batch.map((c) => compressChunk(c, signal, prev).catch(() => '')))
+    for (const r of results) { if (r) outs.push(r) }
+    prev = outs[outs.length - 1] || prev
   }
   if (!outs.length) throw new Error('empty')
   return outs.join('\n')
+}
+
+// 质量自检：抽取原文关键数字/英文专名，检查压缩结果是否保留
+function qualityCheck(src, out) {
+  // 只查信息量大的 token：英文/工具专名（≥5 字符）+ 百分比。日期与普通数字压缩本就会丢，不误报。
+  const names = [...new Set((src.match(/[A-Za-z][A-Za-z0-9_.-]{4,}/g) || []))].slice(0, 6)
+  const pct = [...new Set((src.match(/\d+(?:\.\d+)?%/g) || []))].slice(0, 4)
+  const tokens = names.concat(pct)
+  if (!tokens.length) return { ok: true, missing: [] }
+  const missing = tokens.filter((t) => !out.includes(t))
+  return { ok: missing.length <= Math.ceil(tokens.length / 2), missing }
+}
+
+// 失败回退：原文摘录 + 明确标记未压缩
+function fallbackExcerpt(text) {
+  const flat = String(text || '').replace(/\s+/g, ' ').trim()
+  return flat.slice(0, 600) + (flat.length > 600 ? '…' : '')
 }
 
 function clean(s) {
@@ -69,9 +93,7 @@ function clean(s) {
 
 function findLog(sessionId) {
   if (!sessionId) return null
-  let dirs = []
-  try { dirs = readdirSync(SESS_ROOT) } catch { return null }
-  for (const ws of dirs) {
+  for (const ws of readdirSync(SESS_ROOT)) {
     const p = join(SESS_ROOT, ws, sessionId, 'session.v4.jsonl.zstd')
     if (existsSync(p)) return p
   }
@@ -155,10 +177,11 @@ async function autoCompress(sessionId) {
     const meS = me.slice(0, 80) + (me.length > 80 ? '…' : '')
     const day = new Date().toISOString().slice(0, 10)
     const entry = day + ' | ta：「' + taS + '」→ 我：「' + meS + '」'
-    rollCard(join(CARD_DIR, key + '.md'), '# 会话卡 · ' + key + '\n\n> 每轮对话后自动滚动（dsh-ctxc）。', entry)
+    const header = '# 会话卡 · ' + key + '\n\n> 每轮对话后自动滚动（local-ctxc）。'
+    rollCard(join(CARD_DIR, key + '.md'), header, entry)
     state[key] = { size: st.size, mtime: st.mtimeMs, at: Date.now() }
     saveState(state)
-  } catch { /* 静默 */ } finally {
+  } catch { /* 静默：压缩失败不影响对话 */ } finally {
     busy = false
   }
 }
@@ -172,7 +195,7 @@ export function apply(ctx) {
       if (text.length > MAX_LOCAL) {
         const body = text.slice(0, 1900)
         const note = text.length > body.length
-          ? '\n\n（原文共 ' + text.length + ' 字，输入框放不下，已截断至 ' + body.length + ' 字；全文压缩请用 ctxc.py 或分次压缩）'
+          ? '\n\n（原文共 ' + text.length + ' 字，输入框放不下，已截断至 ' + body.length + ' 字；全文压缩用 ctxc.py）'
           : ''
         return { insert: '帮我压缩下面这段，输出三点要点，每点不超过20字：\n\n' + body + note }
       }
@@ -183,16 +206,20 @@ export function apply(ctx) {
           try {
             const out = await compressLocal(text, signal)
             const head = out.length > 1800 ? out.slice(0, 1800) + '…' : out
-            return { insert: '压缩要点：\n' + head }
+            const q = qualityCheck(text, out)
+            const warn = q.ok ? '' : '\n\n⚠ 可能丢要点：' + q.missing.join('、')
+            return { insert: '压缩要点：\n' + head + warn }
           } catch (e) {
             if (signal && signal.aborted) return { toast: '压缩超时，可再点一次' }
-            return { toast: '本地模型不可用，检查 Ollama 服务' }
+            // 回退：不空手而归，给原文摘录并标明未压缩
+            return { insert: '【本地压缩失败，以下为原文摘录（未压缩）】\n' + fallbackExcerpt(text) }
           }
         },
       }
     })
 
     ctx.dshGo.turnNote('auto-compress', (scope) => {
+      // 每轮结束后后台压缩这轮对话，滚进会话卡；不阻塞回合。
       autoCompress(scope.sessionId)
     })
   })
