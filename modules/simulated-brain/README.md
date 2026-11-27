@@ -39,3 +39,18 @@ python3 矩阵.py add --kind 活动 --title "做完的事" --detail "一句可�
 ## 许可
 
 与所在仓库一致（见上级目录 LICENSE）。
+
+## brain.py（发布版，路径可移植）
+
+`brain.py` 是这套东西的引擎：节点 + 突触 + 激活扩散，`add / think / recall / brief / audit / forge / spar / clash / pace / ops / gate` 等子命令。
+运行时版用的是绝对路径；**发布版做了路径适配**，靠三个环境变量：
+
+```sh
+export SIMBRAIN_ROOT=~/simulated-brain     # 节点库与边表所在
+export SIMBRAIN_DATA=$SIMBRAIN_ROOT/data   # jsonl 数据目录
+export SIMBRAIN_KNOW=$SIMBRAIN_ROOT/知识   # 知识/判据目录（导出用）
+python3 brain.py add --kind 活动 --title "第一次跑通" --detail "在隔离目录里冒烟"
+python3 brain.py list --today --n 5
+```
+
+发布前冒烟记录（2026-11-27）：在 `/tmp` 隔离目录里 `--help`、`add`、`list --today` 三步都通，节点正常落盘。
