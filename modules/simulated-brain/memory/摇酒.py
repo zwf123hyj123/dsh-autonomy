@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# 摇酒.py — 模拟大脑子项目「调酒器」的摇酒引擎。
+# 基酒=七情六欲；原料=人物设定卡；摇酒=分析想法选基酒（相关/随机/可调）→ 出配方 → 文案由主人侧模型按配方生成。
+import json, os, sys, random, argparse, urllib.request, subprocess
+
+# 发布版路径适配（2026-11-27）：内用版用绝对路径，这里统一走环境变量；SIMBRAIN_ROOT 由使用方指定，未设时落在用户目录。
+import os as _os
+SIMROOT = _os.environ.get("SIMBRAIN_ROOT") or _os.path.expanduser("~/simulated-brain")
+DATA = _os.environ.get("SIMBRAIN_DATA") or _os.path.join(SIMROOT, "data")
+KNOW = _os.environ.get("SIMBRAIN_KNOW") or _os.path.join(SIMROOT, "知识")
+
+
+OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11436/v1/chat/completions')
+BRAIN_MODEL = os.environ.get('BRAIN_MODEL', 'qwen2.5:1.5b-instruct')
+INJECT = os.path.join(DATA,'本地模型注入.py')
+
+CLOUD_API = os.environ.get('CTXC_CLOUD_API', 'http://127.0.0.1:18326/v1/chat/completions')
+CLOUD_KEY = os.environ.get('CTXC_CLOUD_KEY', 'ofm-iVnqctXF-pb0Xf7jCUifSyjZtrrV9wtN')
+CLOUD_MODEL = os.environ.get('CTXC_CLOUD_MODEL', 'deepseek-official/deepseek-flash')
+
+def ollama(prompt, max_tokens=120, temperature=0.8):
+    """文案生成：先云端（5-10s 质量好），失败再本地兜底（带学习笔记注入）。"""
+    try:
+        cbody = {'model': CLOUD_MODEL, 'messages': [{'role': 'user', 'content': prompt}],
+                 'max_tokens': max_tokens, 'temperature': min(temperature, 1.0), 'stream': False, 'reasoning_effort': 'none'}
+        creq = urllib.request.Request(CLOUD_API, data=json.dumps(cbody).encode(),
+                                      headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + CLOUD_KEY})
+        with urllib.request.urlopen(creq, timeout=30) as r:
+            out = (json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip()
+            if out:
+                return out
+    except Exception:
+        pass
+    head = ''
+    if os.path.exists(INJECT):
+        head = subprocess.run(['python3', INJECT], capture_output=True, text=True, timeout=30).stdout
+    body = {'model': BRAIN_MODEL, 'messages': [{'role': 'user', 'content': head + prompt}],
+            'max_tokens': max_tokens, 'temperature': temperature, 'stream': False}
+    req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req, timeout=180) as r:
+        return (json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip()
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+BASES = json.load(open(os.path.join(HERE, '基酒.json'), encoding='utf-8'))
+KEYS = {}
+for cat in ('七情', '六欲'):
+    for k, v in BASES[cat].items():
+        KEYS[k] = {**v, 'cat': cat}
+
+HINTS = {
+    '开心': ['喜'], '高兴': ['喜'], '快乐': ['喜'], '哈哈': ['喜'], '爽': ['喜'],
+    '生气': ['怒'], '气死': ['怒'], '烦': ['怒'], '讨厌': ['怒'], '火大': ['怒'],
+    '累': ['忧'], '疲惫': ['忧'], '焦虑': ['忧', '恐'], '担心': ['忧'], '难过': ['悲', '忧'],
+    '伤心': ['悲'], '哭': ['悲'], '想': ['思'], '思考': ['思'], '迷茫': ['思', '忧'],
+    '怕': ['恐'], '吓': ['惊', '恐'], '哇': ['惊'], '震惊': ['惊'],
+    '想吃': ['味欲'], '香': ['香欲'], '听': ['听欲'], '看': ['见欲'], '碰': ['触欲'], '想要': ['意欲'],
+}
+
+def classify(text):
+    found = []
+    for hint, ks in HINTS.items():
+        if hint in text:
+            for k in ks:
+                if k not in found:
+                    found.append(k)
+    return found
+
+def pick_bases(found, mode, n=3):
+    if mode == 'random':
+        return random.sample(list(KEYS), n)
+    if mode == 'unrelated':
+        # 相关 1 个 + 不相关 2 个（可调）
+        rel = found[:1] or [random.choice(list(KEYS))]
+        rest = [k for k in KEYS if k not in rel]
+        return rel + random.sample(rest, n - 1)
+    # related / auto：相关优先，不足随机补
+    out = found[:]
+    rest = [k for k in KEYS if k not in out]
+    random.shuffle(rest)
+    while len(out) < n and rest:
+        out.append(rest.pop())
+    return out[:n]
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('idea', help='想法/心情原文')
+    ap.add_argument('--原料', default='无', help='人物设定卡名')
+    ap.add_argument('--mode', choices=['auto', 'related', 'random', 'unrelated'], default='auto')
+    ap.add_argument('--base', default='', help='指定基酒（逗号分隔，可调）')
+    ap.add_argument('--ratio', default='3:2:1', help='混合比例')
+    ap.add_argument('--ollama', action='store_true', help='用本地模型做情绪分类并出文案初稿（带学习笔记注入）')
+    args = ap.parse_args()
+
+    found = classify(args.idea)
+    if args.base:
+        bases = [b for b in args.base.split(',') if b in KEYS]
+        if not bases:
+            print(json.dumps({'错误': '基酒名无效，可用: ' + '、'.join(KEYS)}, ensure_ascii=False)); return
+    else:
+        bases = pick_bases(found, args.mode)
+
+    parts = args.ratio.split(':')
+    recipe = {
+        '想法': args.idea,
+        '情绪识别': found or ['（无明确情绪，随机补基）'],
+        '原料': args.原料,
+        '基酒': [{'名': b, '类': KEYS[b]['cat'], '风味': KEYS[b]['风味'], 'emoji': KEYS[b]['emoji']} for b in bases],
+        '比例': args.ratio,
+        '调制说明': '，'.join('%s %s 份' % (b, p) for b, p in zip(bases, parts + ['1'] * len(bases))) + '（基酒可按心情替换，可调）',
+    }
+    print(json.dumps(recipe, ensure_ascii=False, indent=1))
+
+    if args.ollama:
+        try:
+            cls = ollama('判断下面这句话的主要情绪，只输出一个 JSON 数组，元素从 喜 怒 忧 思 悲 恐 惊 见欲 听欲 香欲 味欲 触欲 意欲 里选 2-3 个：' + args.idea, 60, 0.8)
+            print('[本地模型·情绪] ' + cls, file=sys.stderr)
+            draft = ''
+            import threading as _th
+            _samples = []
+            def _one():
+                try:
+                    seed = int.from_bytes(os.urandom(4), 'big')
+                    body = {'model': BRAIN_MODEL, 'messages': [{'role': 'user', 'content': prompt_d}],
+                            'max_tokens': 160, 'temperature': 2.0, 'top_p': 0.99, 'seed': seed, 'stream': False}
+                    req = urllib.request.Request(OLLAMA, data=json.dumps(body).encode(),
+                                                 headers={'Content-Type': 'application/json'})
+                    with urllib.request.urlopen(req, timeout=180) as r:
+                        _samples.append((json.loads(r.read().decode())['choices'][0]['message'].get('content') or '').strip())
+                except Exception:
+                    pass
+            prompt_d = '按配方（基酒 %s，比例 %s，原料 %s）为下面这句话写一段 60-90 字的中文文案，自然口吻，不带酒类比喻：%s' % ('、'.join(bases), args.ratio, args.原料, args.idea)
+            ts = [_th.Thread(target=_one) for _ in range(2)]
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join()
+            draft = random.choice(_samples) if _samples else ''
+            if draft:
+                print('[本地模型·文案初稿] ' + draft, file=sys.stderr)
+            else:
+                print('[文案未生成：本地模型样本为空]', file=sys.stderr)
+        except Exception as e:
+            print('[本地模型调用失败，回退关键词法] %s' % e, file=sys.stderr)
+
+if __name__ == '__main__':
+    main()

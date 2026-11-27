@@ -56,3 +56,21 @@ python3 brain.py list --today --n 5
 ```
 
 发布前冒烟记录（2026-11-27）：在 `/tmp` 隔离目录里 `--help`、`add`、`list --today` 三步都通，节点正常落盘。
+
+## 目录（2026-11-27 补三层：引擎 / 突触 / 记忆）
+
+```
+simulated-brain/
+├── README.md            本文件（含代号说明）
+├── 规则.md              唯一规则源 R-01~R-21
+├── 矩阵.py              CLI：brief/pace/ops/gate/clash/spar/forge/add
+├── brain.py             脑子引擎：节点+突触+激活扩散（路径可移植）
+├── test_smoke.py        冒烟测试
+├── 变更记录.md          版本历史
+├── engine/              引擎层：思维碰撞 / 神经突触 / 突触清洗 / 建索引 / 查
+├── synapse/             突触层：只放结构说明（数据不发布）
+└── memory/              记忆层（情感并入）：基酒配方 + 摇酒
+```
+
+三层的同步原则：**方法同步、数据不同步**。`data/` 下的节点、边、火花、情绪记录都不进仓库。
+
