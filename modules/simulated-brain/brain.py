@@ -32,7 +32,9 @@ ROOT = os.environ.get("SIMBRAIN_ROOT") or os.path.expanduser("~/simulated-brain"
 DATA_DIR = os.environ.get("SIMBRAIN_DATA") or os.path.join(ROOT, "data")
 KNOW_DIR = os.environ.get("SIMBRAIN_KNOW") or os.path.join(ROOT, "知识")
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+# 发布版：数据目录必须可配置——否则跑起来会把 nodes.jsonl 写进脚本目录（2026-11-27 踩过，冒烟数据误进仓库）
+BASE = os.environ.get("SIMBRAIN_DATA") or os.path.join(ROOT, "data")
+os.makedirs(BASE, exist_ok=True)
 NODES = os.path.join(BASE, "nodes.jsonl")
 EDGES = os.path.join(BASE, "edges.jsonl")
 KINDS = ["对话", "任务", "活动", "产出", "事件", "决定", "思考", "规则", "原文", "知识点", "情报", "云端引用"]
