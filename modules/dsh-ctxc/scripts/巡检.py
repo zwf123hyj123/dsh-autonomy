@@ -61,9 +61,24 @@ def main():
         ok, detail = sg.check_gateway(model)
         add('模型·' + model.split('/')[-1], ok, detail if not ok else '')
 
-    # 5) 常驻进程（判据表）
+    # 5) 常驻进程（判据表）：缺了先自愈拉起，再复查（2026-11-25：App 重启后要能自己回来）
+    _missing = [n for n, pat in J.PROCESS_CHECKS if not proc_running(pat)]
+    if _missing:
+        try:
+            _kp = os.path.join(os.path.dirname(os.path.abspath(__file__)), '常驻保活.py')
+            r = subprocess.run(['python3', _kp], capture_output=True, text=True, timeout=120)
+            _launched = []
+            try:
+                _launched = json.loads((r.stdout or '{}').strip().splitlines()[-1]).get('已拉起') or []
+            except Exception:
+                _launched = []
+            add('常驻自愈', bool(_launched),
+                ('已拉起：' + ','.join(_launched)) if _launched else '缺失但未拉起（看保活日志）')
+        except Exception as e:
+            add('常驻自愈', False, '保活失败：' + str(e)[:60])
     for name, pattern in J.PROCESS_CHECKS:
-        add(name, proc_running(pattern), '')
+        _ok = proc_running(pattern)
+        add(name, _ok, '' if _ok else '缺失（可能刚被自愈拉起）')
 
     # 5.5) 浏览器与 keepalive（闲鱼值守依赖；keepalive 死了自动拉起）
     ok, code = probe(9333, '/json/version')
@@ -80,6 +95,43 @@ def main():
     else:
         add('keepalive', True, '')
 
+    # 5.6) 自启插件：引擎启动时把常驻带回（登记在 profile patch 里；执行证据在 /tmp/local-autostart.log）
+    _patch = os.path.join(os.path.expanduser('~'), '.dsh', 'profiles', 'web', 'cordis.patch.yml')
+    _reg = False
+    try:
+        _reg = 'local-autostart' in open(_patch, encoding='utf-8').read()
+    except OSError:
+        _reg = False
+    _ran = ''
+    try:
+        with open('/tmp/local-autostart.log', encoding='utf-8') as _f:
+            _lines = [x for x in _f if x.strip()]
+        _raw = _lines[-1].strip().split(' ')[0]  # ISO/UTC 写入，显示时转本地（92 轮同类教训）
+        import datetime as _dt
+        _ran = _dt.datetime.fromisoformat(_raw.replace('Z', '+00:00')) \
+            .astimezone().strftime('%m-%d %H:%M:%S')
+    except Exception:
+        _ran = ''
+    add('自启插件', _reg,
+        ('已登记·上次执行 ' + _ran) if (_reg and _ran) else
+        ('已登记·本引擎启动后还没执行过（下次重启会跑）' if _reg else '未登记（删了？）'))
+
+    # 5.5) 引擎自验（重启请求队列 / 配置是否已被引擎加载）——2026-11-26 热重启连坐事故后加
+    _req = os.path.join(os.path.expanduser('~'), '.dsh', 'engine-standby', 'restart.request.json')
+    _pending = os.path.exists(_req)
+    add('重启队列', not _pending, '有请求积压（守护者 30 秒内会消费，若排队很久说明守护者不在）' if _pending else '')
+    _loaded = None
+    try:
+        import subprocess as _sp, json as _json
+        _r = _sp.run(['python3', os.path.join(os.path.dirname(os.path.abspath(__file__)), '虚拟引擎.py'), '--verify'],
+                     capture_output=True, text=True, timeout=60)
+        _j = _json.loads(_r.stdout or '{}')
+        _loaded = _j.get('patch已加载')
+        add('配置加载', _loaded is not False,
+            '配置改过还没重启：%s' % _j.get('patch_mtime', '?'))
+    except Exception as e:
+        add('配置加载', True, '自验跳过：' + str(e)[:50])
+
     # 6) 模拟大脑层健康（八层里能自动判的几层）
     ARCH = '/root/workspace/记忆档案'
 
@@ -95,10 +147,29 @@ def main():
             age_h = (time.time() - m) / 3600
             add('层·%s' % name, age_h <= max_age_s / 3600, '%.1f 小时前' % age_h)
 
-    fresh('突触', ARCH + '/突触/synapses.jsonl', 24 * 3600)
+    # 2026-11-26 修判据：synapses.json 是每轮重写的权重网络（603 边/389 激活，23:00 更新）；
+    # synapses.jsonl 只是"有新边通过质量门"时偶发追加的日志，拿它判新鲜度会恒报陈旧（假缺口）。
+    fresh('突触', ARCH + '/突触/synapses.json', 24 * 3600)
+    # 核心速读 vs 全文（高危条款必须进速读；速读不许长出全文没有的规矩）
+    try:
+        import subprocess as _sp
+        _r = _sp.run(['python3', ARCH + '/核心一致性.py', '--strict'],
+                     capture_output=True, text=True, timeout=60)
+        _miss = [l.strip() for l in (_r.stdout or '').splitlines() if l.strip().startswith('✗')]
+        add('核心速读覆盖', _r.returncode == 0, ('; '.join(_miss[:2]) if _miss else ''))
+    except Exception as e:
+        add('核心速读覆盖', True, '跳过：' + str(e)[:40])
+
+    try:
+        _n = sum(1 for _ in open(ARCH + '/突触/synapses.jsonl', encoding='utf-8'))
+        add('层·真突触', True, '%d 条边（偶发追加，不按新鲜度判）' % _n)
+    except Exception as e:
+        add('层·真突触', False, str(e)[:40])
     fresh('思维流', ARCH + '/突触/思维流-*.md', 72 * 3600)
     fresh('灵感火花', ARCH + '/突触/灵感-*.md', 7 * 86400)
-    fresh('调酒器', ARCH + '/调酒器/产出-*.md', 7 * 86400)
+    # 2026-11-27 收窄：7 天太宽——收工链若断（rrule 死分支那种），一周都报绿。
+    # 收工每晚跑一次，48 小时没有新卡就说明至少漏了一晚，必须报。
+    fresh('调酒器', ARCH + '/调酒器/产出-*.md', 48 * 3600)
     fresh('知识', ARCH + '/知识/*.md', 7 * 86400)
 
     # 感知层：24 小时内必须有「有效」条目（非未取到）
@@ -106,7 +177,13 @@ def main():
         import datetime as _dt
         today = _dt.date.today().isoformat()
         txt = open(ARCH + '/感知/感知日志.md', encoding='utf-8').read()
-        valid = [l for l in txt.splitlines() if today in l and '未取到' not in l and l.startswith('|')]
+        # 2026-11-26 修判据：实际写入有两种格式（`| 日期 | 内容 |` 表格行 与 `日期 时间  内容` 纯文本行），
+        # 原来要求 startswith('|')，把纯文本格式的有效条目全判成 0 条 —— 判据跟写入口径不一致。
+        # 2026-11-27 修：跨天后「今天」必然 0 条（凌晨 00:0x 就报红）。改看今天或昨天，24 小时窗口。
+        import datetime as _dt2
+        yday = (_dt2.date.today() - _dt2.timedelta(days=1)).isoformat()
+        valid = [l for l in txt.splitlines()
+                 if (today in l or yday in l) and '未取到' not in l and len(l.strip()) > 20]
         add('层·感知(今日有效条目)', len(valid) > 0, '%d 条' % len(valid))
     except Exception as e:
         add('层·感知(今日有效条目)', False, str(e)[:60])
