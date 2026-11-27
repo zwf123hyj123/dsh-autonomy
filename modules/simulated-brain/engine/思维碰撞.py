@@ -10,7 +10,7 @@ DATA = _os.environ.get("SIMBRAIN_DATA") or _os.path.join(SIMROOT, "data")
 KNOW = _os.environ.get("SIMBRAIN_KNOW") or _os.path.join(SIMROOT, "知识")
 
 
-ARCHIVE = 'DATA'
+ARCHIVE = DATA
 REG = os.path.join(ARCHIVE, '发布清单.md')
 KNOW = os.path.join(ARCHIVE, '知识')
 SYN = os.path.join(ARCHIVE, '突触', 'synapses.jsonl')

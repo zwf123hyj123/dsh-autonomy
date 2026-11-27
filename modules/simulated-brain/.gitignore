@@ -2,4 +2,6 @@ nodes.jsonl
 edges.jsonl
 __pycache__/
 data/
+DATA/
 *.pyc
+候选-*.json
